@@ -23,7 +23,8 @@ No installation needed. Configure your AI client directly:
       "command": "npx",
       "args": ["-y", "chatlab-mcp"],
       "env": {
-        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx"
+        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx",
+        "CHATLAB_URL": "http://127.0.0.1:5200"
       }
     }
   }
@@ -50,7 +51,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "npx",
       "args": ["-y", "chatlab-mcp"],
       "env": {
-        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx"
+        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx",
+        "CHATLAB_URL": "http://127.0.0.1:5200"
       }
     }
   }
@@ -65,7 +67,8 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
       "command": "/opt/homebrew/bin/node",
       "args": ["/absolute/path/to/chatlab-mcp/dist/index.js"],
       "env": {
-        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx"
+        "CHATLAB_TOKEN": "clb_xxxxxxxxxxxx",
+        "CHATLAB_URL": "http://127.0.0.1:5200"
       }
     }
   }
