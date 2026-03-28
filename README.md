@@ -1,5 +1,7 @@
 # chatlab-mcp
 
+**[English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md)**
+
 MCP server that connects [ChatLab](https://github.com/hellodigua/ChatLab) to AI assistants (Claude Desktop, Cursor, custom agents). Query your local chat history with natural language.
 
 > Tracks ChatLab v0.14.0
