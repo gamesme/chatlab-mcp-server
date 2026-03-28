@@ -34,7 +34,9 @@ export async function getMessages(
 
   const result: any = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
   if (result.data?.messages) {
-    result.data.messages = result.data.messages.map(({ senderAvatar, senderAliases, ...msg }: any) => msg)
+    result.data.messages = result.data.messages.map(
+      ({ senderAvatar, senderAliases, senderId, senderPlatformId, id, replyToMessageId, ...msg }: any) => msg
+    )
     const { total, page: p = 1, messages } = result.data
     if (total !== undefined && messages.length < total) {
       result.data.has_more = true
