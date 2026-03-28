@@ -4,9 +4,10 @@ import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
 
 const MESSAGE_TYPES: Record<string, string> = {
-  '0': 'text', '1': 'image', '2': 'voice', '3': 'video', '4': 'emoji',
-  '5': 'file', '7': 'location', '8': 'system', '21': 'voip', '23': 'quote',
-  '24': 'pat', '25': 'link', '27': 'music', '80': 'miniapp', '99': 'other',
+  '0': 'text', '1': 'image', '2': 'voice', '3': 'video', '4': 'file',
+  '5': 'emoji', '7': 'link', '8': 'location', '20': 'redPacket', '21': 'transfer',
+  '22': 'poke', '23': 'call', '24': 'share', '25': 'reply', '26': 'forward',
+  '27': 'contact', '80': 'system', '81': 'recall', '99': 'other',
 }
 
 export async function getStatsOverview(
