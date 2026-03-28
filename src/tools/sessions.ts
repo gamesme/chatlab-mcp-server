@@ -4,7 +4,7 @@ import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
 
 function stripSession(s: any): object {
-  const { groupAvatar, memberAvatar, dbPath, ...rest } = s
+  const { groupAvatar, memberAvatar, dbPath, groupId, ownerId, importedAt, summaryCount, aiConversationCount, ...rest } = s
   return rest
 }
 
