@@ -44,8 +44,9 @@ describe('ChatLabClient', () => {
     it('throws ChatLabError with null status on connection error', async () => {
       vi.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'))
 
-      await expect(client.get('/api/v1/sessions')).rejects.toThrow(ChatLabError)
-      await expect(client.get('/api/v1/sessions')).rejects.toMatchObject({
+      const promise = client.get('/api/v1/sessions')
+      await expect(promise).rejects.toThrow(ChatLabError)
+      await expect(promise).rejects.toMatchObject({
         status: null,
         message: expect.stringContaining('ChatLab is not running'),
       })
@@ -54,8 +55,9 @@ describe('ChatLabClient', () => {
     it('throws ChatLabError(401) on invalid token', async () => {
       vi.mocked(fetch).mockResolvedValue(new Response('Unauthorized', { status: 401 }))
 
-      await expect(client.get('/api/v1/sessions')).rejects.toThrow(ChatLabError)
-      await expect(client.get('/api/v1/sessions')).rejects.toMatchObject({
+      const promise = client.get('/api/v1/sessions')
+      await expect(promise).rejects.toThrow(ChatLabError)
+      await expect(promise).rejects.toMatchObject({
         status: 401,
         message: expect.stringContaining('Invalid API token'),
       })
@@ -64,8 +66,9 @@ describe('ChatLabClient', () => {
     it('throws ChatLabError(404) on not found', async () => {
       vi.mocked(fetch).mockResolvedValue(new Response('Not Found', { status: 404 }))
 
-      await expect(client.get('/api/v1/sessions/99')).rejects.toThrow(ChatLabError)
-      await expect(client.get('/api/v1/sessions/99')).rejects.toMatchObject({ status: 404 })
+      const promise = client.get('/api/v1/sessions/99')
+      await expect(promise).rejects.toThrow(ChatLabError)
+      await expect(promise).rejects.toMatchObject({ status: 404 })
     })
 
     it('throws ChatLabError with status and body on other HTTP errors', async () => {
@@ -98,6 +101,20 @@ describe('ChatLabClient', () => {
           }),
         })
       )
+    })
+
+    it('throws ChatLabError(401) on invalid token', async () => {
+      vi.mocked(fetch).mockResolvedValue(new Response('Unauthorized', { status: 401 }))
+
+      const promise = client.post('/api/v1/sessions/1/sql', { query: 'SELECT 1' })
+      await expect(promise).rejects.toMatchObject({ status: 401 })
+    })
+
+    it('throws ChatLabError with null status on connection error', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('fetch failed'))
+
+      const promise = client.post('/api/v1/sessions/1/sql', { query: 'SELECT 1' })
+      await expect(promise).rejects.toMatchObject({ status: null })
     })
   })
 })
