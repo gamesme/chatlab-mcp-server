@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
 
+const MAX_LIMIT = 100
+
 const getMessagesSchema = z.object({
   session_id: z.string().describe('Session ID'),
   keyword: z.string().optional().describe('Substring search'),
@@ -11,7 +13,7 @@ const getMessagesSchema = z.object({
   sender_id: z.string().optional().describe('Filter by member platformId'),
   type: z.number().optional().describe('Filter by message type number'),
   page: z.number().optional().describe('Page number (default: 1)'),
-  limit: z.number().optional().describe('Messages per page, max 1000 (default: 20)'),
+  limit: z.number().optional().describe(`Messages per page, max ${MAX_LIMIT} (default: 20). Use pagination to retrieve more.`),
 })
 
 type GetMessagesParams = z.infer<typeof getMessagesSchema>
@@ -28,11 +30,16 @@ export async function getMessages(
   if (filters.sender_id !== undefined) query.sender_id = filters.sender_id
   if (filters.type !== undefined) query.type = String(filters.type)
   if (filters.page !== undefined) query.page = String(filters.page)
-  if (filters.limit !== undefined) query.limit = String(filters.limit)
+  query.limit = String(Math.min(filters.limit ?? 20, MAX_LIMIT))
 
   const result: any = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
   if (result.data?.messages) {
     result.data.messages = result.data.messages.map(({ senderAvatar, ...msg }: any) => msg)
+    const { total, page: p = 1, messages } = result.data
+    if (total !== undefined && messages.length < total) {
+      result.data.has_more = true
+      result.data.hint = `Showing ${messages.length} of ${total} messages. Use page=${Number(p) + 1} to get the next batch.`
+    }
   }
   return JSON.stringify(result, null, 2)
 }
@@ -40,7 +47,7 @@ export async function getMessages(
 export function registerMessagesTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_messages',
-    'Retrieves messages from a session with optional filters for keyword, date range, sender, and pagination.',
+    `Retrieves messages from a session (max ${MAX_LIMIT} per call). Use page parameter to paginate. For large time ranges, prefer narrower windows or keyword search to avoid context overflow.`,
     getMessagesSchema.shape,
     async (args) => {
       try {
