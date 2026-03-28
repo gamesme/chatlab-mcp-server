@@ -1,17 +1,20 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { ChatLabClient, ChatLabError } from '../client.js'
+import { ChatLabClient } from '../client.js'
+import { toolError } from './utils.js'
 
-interface GetMessagesParams {
-  session_id: number
-  keyword?: string
-  start_time?: number
-  end_time?: number
-  sender_id?: string
-  type?: number
-  page?: number
-  limit?: number
-}
+const getMessagesSchema = z.object({
+  session_id: z.number().describe('Session ID'),
+  keyword: z.string().optional().describe('Substring search'),
+  start_time: z.number().optional().describe('Start time as Unix timestamp (seconds)'),
+  end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),
+  sender_id: z.string().optional().describe('Filter by member platformId'),
+  type: z.number().optional().describe('Filter by message type number'),
+  page: z.number().optional().describe('Page number (default: 1)'),
+  limit: z.number().optional().describe('Messages per page, max 1000 (default: 20)'),
+})
+
+type GetMessagesParams = z.infer<typeof getMessagesSchema>
 
 export async function getMessages(
   client: Pick<ChatLabClient, 'get'>,
@@ -35,28 +38,13 @@ export function registerMessagesTools(server: McpServer, client: ChatLabClient):
   server.tool(
     'get_messages',
     'Retrieves messages from a session with optional filters for keyword, date range, sender, and pagination.',
-    {
-      session_id: z.number().describe('Session ID'),
-      keyword: z.string().optional().describe('Substring search'),
-      start_time: z.number().optional().describe('Start time as Unix timestamp (seconds)'),
-      end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),
-      sender_id: z.string().optional().describe('Filter by member platformId'),
-      type: z.number().optional().describe('Filter by message type number'),
-      page: z.number().optional().describe('Page number (default: 1)'),
-      limit: z.number().optional().describe('Messages per page, max 1000 (default: 20)'),
-    },
+    getMessagesSchema.shape,
     async (args) => {
       try {
-        const text = await getMessages(client, args as GetMessagesParams)
+        const text = await getMessages(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
-        const message =
-          e instanceof ChatLabError && e.status === 404
-            ? `Session not found: ${args.session_id}`
-            : e instanceof Error
-              ? e.message
-              : 'Unknown error'
-        return { content: [{ type: 'text' as const, text: message }], isError: true as const }
+        return toolError(e, args.session_id)
       }
     }
   )

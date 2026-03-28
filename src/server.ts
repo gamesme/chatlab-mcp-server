@@ -10,7 +10,7 @@ import { registerExportTools } from './tools/export.js'
 export function createServer(client: ChatLabClient): McpServer {
   const server = new McpServer({
     name: 'chatlab',
-    version: '1.0.0',
+    version: '0.1.0',
   })
 
   registerSessionTools(server, client)

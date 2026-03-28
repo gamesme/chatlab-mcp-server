@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { ChatLabClient, ChatLabError } from '../client.js'
+import { ChatLabClient } from '../client.js'
+import { toolError } from './utils.js'
 
 export async function listSessions(client: Pick<ChatLabClient, 'get'>): Promise<string> {
   const sessions = await client.get('/api/v1/sessions')
@@ -13,16 +14,6 @@ export async function getSession(
 ): Promise<string> {
   const session = await client.get(`/api/v1/sessions/${id}`)
   return JSON.stringify(session, null, 2)
-}
-
-function toolError(e: unknown, sessionId?: number): { content: [{ type: 'text'; text: string }]; isError: true } {
-  let message: string
-  if (e instanceof ChatLabError && e.status === 404 && sessionId !== undefined) {
-    message = `Session not found: ${sessionId}`
-  } else {
-    message = e instanceof Error ? e.message : 'Unknown error'
-  }
-  return { content: [{ type: 'text' as const, text: message }], isError: true as const }
 }
 
 export function registerSessionTools(server: McpServer, client: ChatLabClient): void {

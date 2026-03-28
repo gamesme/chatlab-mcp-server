@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { ChatLabClient, ChatLabError } from '../client.js'
+import { ChatLabClient } from '../client.js'
+import { toolError } from './utils.js'
 
 export async function exportSession(
   client: Pick<ChatLabClient, 'get'>,
@@ -21,13 +22,7 @@ export function registerExportTools(server: McpServer, client: ChatLabClient): v
           content: [{ type: 'text' as const, text: await exportSession(client, session_id) }],
         }
       } catch (e) {
-        const message =
-          e instanceof ChatLabError && e.status === 404
-            ? `Session not found: ${session_id}`
-            : e instanceof Error
-              ? e.message
-              : 'Unknown error'
-        return { content: [{ type: 'text' as const, text: message }], isError: true as const }
+        return toolError(e, session_id)
       }
     }
   )
