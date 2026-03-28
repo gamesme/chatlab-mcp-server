@@ -10,10 +10,10 @@ describe('getMessages', () => {
     const page = { messages: [{ id: 1, content: 'Hello' }], total: 1 }
     mockClient.get.mockResolvedValue(page)
 
-    await getMessages(mockClient as any, { session_id: 5 })
+    await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
 
     expect(mockClient.get).toHaveBeenCalledWith(
-      '/api/v1/sessions/5/messages',
+      '/api/v1/sessions/chat_5_abc/messages',
       expect.any(Object)
     )
   })
@@ -22,7 +22,7 @@ describe('getMessages', () => {
     mockClient.get.mockResolvedValue({ messages: [] })
 
     await getMessages(mockClient as any, {
-      session_id: 5,
+      session_id: 'chat_5_abc',
       keyword: 'hello',
       start_time: 1700000000,
       end_time: 1700100000,
@@ -32,7 +32,7 @@ describe('getMessages', () => {
       limit: 50,
     })
 
-    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/5/messages', {
+    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_5_abc/messages', {
       keyword: 'hello',
       start_time: '1700000000',
       end_time: '1700100000',
@@ -46,7 +46,7 @@ describe('getMessages', () => {
   it('omits undefined optional params from query', async () => {
     mockClient.get.mockResolvedValue({ messages: [] })
 
-    await getMessages(mockClient as any, { session_id: 5 })
+    await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
 
     const params = mockClient.get.mock.calls[0][1]
     expect(params).not.toHaveProperty('keyword')
@@ -58,7 +58,7 @@ describe('getMessages', () => {
     const page = { messages: [{ id: 1 }], total: 1 }
     mockClient.get.mockResolvedValue(page)
 
-    const result = await getMessages(mockClient as any, { session_id: 5 })
+    const result = await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
     expect(JSON.parse(result)).toEqual(page)
   })
 })

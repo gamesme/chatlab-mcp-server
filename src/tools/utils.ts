@@ -2,7 +2,7 @@ import { ChatLabError } from '../client.js'
 
 export function toolError(
   e: unknown,
-  sessionId?: number
+  sessionId?: string
 ): { content: [{ type: 'text'; text: string }]; isError: true } {
   let message: string
   if (e instanceof ChatLabError && e.status === 404 && sessionId !== undefined) {

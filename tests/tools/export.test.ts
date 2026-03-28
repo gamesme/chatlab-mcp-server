@@ -8,9 +8,9 @@ describe('exportSession', () => {
     const exportData = { version: 1, messages: [{ id: 1 }] }
     mockClient.get.mockResolvedValue(exportData)
 
-    const result = await exportSession(mockClient as any, 9)
+    const result = await exportSession(mockClient as any, 'chat_9_abc')
 
-    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/9/export')
+    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_9_abc/export')
     expect(JSON.parse(result)).toEqual(exportData)
   })
 })

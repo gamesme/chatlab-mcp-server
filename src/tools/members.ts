@@ -5,7 +5,7 @@ import { toolError } from './utils.js'
 
 export async function getMembers(
   client: Pick<ChatLabClient, 'get'>,
-  sessionId: number
+  sessionId: string
 ): Promise<string> {
   const res: any = await client.get(`/api/v1/sessions/${sessionId}/members`)
   const cleaned = { ...res, data: res.data?.map(({ avatar, ...m }: any) => m) }
@@ -16,7 +16,7 @@ export function registerMembersTools(server: McpServer, client: ChatLabClient): 
   server.tool(
     'get_members',
     'Lists all members in a session with their platformId, name, and role.',
-    { session_id: z.number().describe('Session ID') },
+    { session_id: z.string().describe('Session ID') },
     async ({ session_id }) => {
       try {
         return { content: [{ type: 'text' as const, text: await getMembers(client, session_id) }] }

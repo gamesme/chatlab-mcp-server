@@ -16,7 +16,7 @@ export async function listSessions(client: Pick<ChatLabClient, 'get'>): Promise<
 
 export async function getSession(
   client: Pick<ChatLabClient, 'get'>,
-  id: number
+  id: string
 ): Promise<string> {
   const res: any = await client.get(`/api/v1/sessions/${id}`)
   const cleaned = { ...res, data: stripSession(res.data) }
@@ -40,7 +40,7 @@ export function registerSessionTools(server: McpServer, client: ChatLabClient): 
   server.tool(
     'get_session',
     'Gets full details of a single session by ID.',
-    { id: z.number().describe('Session ID') },
+    { id: z.string().describe('Session ID') },
     async ({ id }) => {
       try {
         return { content: [{ type: 'text' as const, text: await getSession(client, id) }] }

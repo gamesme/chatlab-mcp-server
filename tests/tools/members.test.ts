@@ -11,10 +11,10 @@ describe('getMembers', () => {
     }
     mockClient.get.mockResolvedValue(raw)
 
-    const result = await getMembers(mockClient as any, 3)
+    const result = await getMembers(mockClient as any, 'chat_3_abc')
     const parsed = JSON.parse(result)
 
-    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/3/members')
+    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_3_abc/members')
     expect(parsed.data[0]).not.toHaveProperty('avatar')
     expect(parsed.data[0].name).toBe('Alice')
   })

@@ -19,6 +19,7 @@ describe('listSessions', () => {
     const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions')
+
     expect(parsed.data[0]).not.toHaveProperty('groupAvatar')
     expect(parsed.data[0]).not.toHaveProperty('dbPath')
     expect(parsed.data[0].name).toBe('Work Chat')
@@ -39,10 +40,10 @@ describe('getSession', () => {
     }
     mockClient.get.mockResolvedValue(raw)
 
-    const result = await getSession(mockClient as any, 42)
+    const result = await getSession(mockClient as any, 'chat_42_abc')
     const parsed = JSON.parse(result)
 
-    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/42')
+    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_42_abc')
     expect(parsed.data).not.toHaveProperty('groupAvatar')
     expect(parsed.data).not.toHaveProperty('dbPath')
     expect(parsed.data.name).toBe('Team Chat')

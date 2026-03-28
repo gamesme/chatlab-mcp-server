@@ -8,9 +8,9 @@ describe('getStatsOverview', () => {
     const stats = { totalMessages: 1500, activeMemberCount: 12 }
     mockClient.get.mockResolvedValue(stats)
 
-    const result = await getStatsOverview(mockClient as any, 7)
+    const result = await getStatsOverview(mockClient as any, 'chat_7_abc')
 
-    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/7/stats/overview')
+    expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_7_abc/stats/overview')
     expect(JSON.parse(result)).toEqual(stats)
   })
 })

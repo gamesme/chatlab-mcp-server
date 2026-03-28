@@ -4,7 +4,7 @@ import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
 
 const getMessagesSchema = z.object({
-  session_id: z.number().describe('Session ID'),
+  session_id: z.string().describe('Session ID'),
   keyword: z.string().optional().describe('Substring search'),
   start_time: z.number().optional().describe('Start time as Unix timestamp (seconds)'),
   end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),

@@ -5,7 +5,7 @@ import { toolError } from './utils.js'
 
 export async function executeSQL(
   client: Pick<ChatLabClient, 'post'>,
-  sessionId: number,
+  sessionId: string,
   query: string
 ): Promise<string> {
   if (!query.trim().toUpperCase().startsWith('SELECT')) {
@@ -20,7 +20,7 @@ export function registerSQLTools(server: McpServer, client: ChatLabClient): void
     'execute_sql',
     'Executes a read-only SELECT query against the session database. Use for analysis not covered by other tools (word frequency, member interactions, activity breakdown).',
     {
-      session_id: z.number().describe('Session ID'),
+      session_id: z.string().describe('Session ID'),
       query: z.string().describe('SQL SELECT query to execute'),
     },
     async ({ session_id, query }) => {

@@ -5,7 +5,7 @@ import { toolError } from './utils.js'
 
 export async function exportSession(
   client: Pick<ChatLabClient, 'get'>,
-  sessionId: number
+  sessionId: string
 ): Promise<string> {
   const data = await client.get(`/api/v1/sessions/${sessionId}/export`)
   return JSON.stringify(data, null, 2)
@@ -15,7 +15,7 @@ export function registerExportTools(server: McpServer, client: ChatLabClient): v
   server.tool(
     'export_session',
     'Exports the full session as ChatLab Format JSON (up to 100k messages). Use for deep analysis with large context windows.',
-    { session_id: z.number().describe('Session ID') },
+    { session_id: z.string().describe('Session ID') },
     async ({ session_id }) => {
       try {
         return {
