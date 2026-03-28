@@ -8,7 +8,7 @@ export async function getMembers(
   sessionId: string
 ): Promise<string> {
   const res: any = await client.get(`/api/v1/sessions/${sessionId}/members`)
-  const cleaned = { ...res, data: res.data?.map(({ avatar, ...m }: any) => m) }
+  const cleaned = { ...res, data: res.data?.map(({ avatar, aliases, ...m }: any) => m) }
   return JSON.stringify(cleaned, null, 2)
 }
 

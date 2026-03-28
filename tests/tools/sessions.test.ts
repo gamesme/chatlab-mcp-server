@@ -11,7 +11,7 @@ describe('listSessions', () => {
   it('strips groupAvatar and dbPath, returns cleaned sessions', async () => {
     const raw = {
       success: true,
-      data: [{ id: 1, name: 'Work Chat', platform: 'Slack', groupAvatar: 'data:image/...', dbPath: '/private/db' }],
+      data: [{ id: 1, name: 'Work Chat', platform: 'Slack', groupAvatar: 'data:image/...', memberAvatar: 'data:image/...', dbPath: '/private/db' }],
     }
     mockClient.get.mockResolvedValue(raw)
 
@@ -21,6 +21,7 @@ describe('listSessions', () => {
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions')
 
     expect(parsed.data[0]).not.toHaveProperty('groupAvatar')
+    expect(parsed.data[0]).not.toHaveProperty('memberAvatar')
     expect(parsed.data[0]).not.toHaveProperty('dbPath')
     expect(parsed.data[0].name).toBe('Work Chat')
   })
