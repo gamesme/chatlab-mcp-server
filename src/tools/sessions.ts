@@ -3,17 +3,24 @@ import { z } from 'zod'
 import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
 
+function stripSession(s: any): object {
+  const { groupAvatar, dbPath, ...rest } = s
+  return rest
+}
+
 export async function listSessions(client: Pick<ChatLabClient, 'get'>): Promise<string> {
-  const sessions = await client.get('/api/v1/sessions')
-  return JSON.stringify(sessions, null, 2)
+  const res: any = await client.get('/api/v1/sessions')
+  const cleaned = { ...res, data: res.data?.map(stripSession) }
+  return JSON.stringify(cleaned, null, 2)
 }
 
 export async function getSession(
   client: Pick<ChatLabClient, 'get'>,
   id: number
 ): Promise<string> {
-  const session = await client.get(`/api/v1/sessions/${id}`)
-  return JSON.stringify(session, null, 2)
+  const res: any = await client.get(`/api/v1/sessions/${id}`)
+  const cleaned = { ...res, data: stripSession(res.data) }
+  return JSON.stringify(cleaned, null, 2)
 }
 
 export function registerSessionTools(server: McpServer, client: ChatLabClient): void {

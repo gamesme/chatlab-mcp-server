@@ -30,7 +30,10 @@ export async function getMessages(
   if (filters.page !== undefined) query.page = String(filters.page)
   if (filters.limit !== undefined) query.limit = String(filters.limit)
 
-  const result = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
+  const result: any = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
+  if (result.data?.messages) {
+    result.data.messages = result.data.messages.map(({ senderAvatar, ...msg }: any) => msg)
+  }
   return JSON.stringify(result, null, 2)
 }
 

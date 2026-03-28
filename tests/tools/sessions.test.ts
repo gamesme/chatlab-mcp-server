@@ -8,14 +8,20 @@ const mockClient = {
 }
 
 describe('listSessions', () => {
-  it('returns JSON string of sessions list', async () => {
-    const sessions = [{ id: 1, name: 'Work Chat', platform: 'Slack' }]
-    mockClient.get.mockResolvedValue(sessions)
+  it('strips groupAvatar and dbPath, returns cleaned sessions', async () => {
+    const raw = {
+      success: true,
+      data: [{ id: 1, name: 'Work Chat', platform: 'Slack', groupAvatar: 'data:image/...', dbPath: '/private/db' }],
+    }
+    mockClient.get.mockResolvedValue(raw)
 
     const result = await listSessions(mockClient as any)
+    const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions')
-    expect(JSON.parse(result)).toEqual(sessions)
+    expect(parsed.data[0]).not.toHaveProperty('groupAvatar')
+    expect(parsed.data[0]).not.toHaveProperty('dbPath')
+    expect(parsed.data[0].name).toBe('Work Chat')
   })
 
   it('propagates errors from client', async () => {
@@ -26,13 +32,19 @@ describe('listSessions', () => {
 })
 
 describe('getSession', () => {
-  it('returns JSON string of session by id', async () => {
-    const session = { id: 42, name: 'Team Chat', platform: 'WeChat' }
-    mockClient.get.mockResolvedValue(session)
+  it('strips groupAvatar and dbPath from single session', async () => {
+    const raw = {
+      success: true,
+      data: { id: 42, name: 'Team Chat', platform: 'WeChat', groupAvatar: 'data:image/...', dbPath: '/private/db' },
+    }
+    mockClient.get.mockResolvedValue(raw)
 
     const result = await getSession(mockClient as any, 42)
+    const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/42')
-    expect(JSON.parse(result)).toEqual(session)
+    expect(parsed.data).not.toHaveProperty('groupAvatar')
+    expect(parsed.data).not.toHaveProperty('dbPath')
+    expect(parsed.data.name).toBe('Team Chat')
   })
 })

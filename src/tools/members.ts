@@ -7,8 +7,9 @@ export async function getMembers(
   client: Pick<ChatLabClient, 'get'>,
   sessionId: number
 ): Promise<string> {
-  const members = await client.get(`/api/v1/sessions/${sessionId}/members`)
-  return JSON.stringify(members, null, 2)
+  const res: any = await client.get(`/api/v1/sessions/${sessionId}/members`)
+  const cleaned = { ...res, data: res.data?.map(({ avatar, ...m }: any) => m) }
+  return JSON.stringify(cleaned, null, 2)
 }
 
 export function registerMembersTools(server: McpServer, client: ChatLabClient): void {
