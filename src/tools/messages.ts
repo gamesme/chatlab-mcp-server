@@ -47,7 +47,7 @@ export async function getMessages(
 export function registerMessagesTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_messages',
-    `Retrieves messages from a session (max ${MAX_LIMIT} per call). Use page parameter to paginate. For large time ranges, prefer narrower windows or keyword search to avoid context overflow.`,
+    `The primary tool for reading message content. Retrieves up to ${MAX_LIMIT} messages per call with filters for keyword, time range, and sender. Use page to paginate. Always prefer this over execute_sql when reading messages.`,
     getMessagesSchema.shape,
     async (args) => {
       try {

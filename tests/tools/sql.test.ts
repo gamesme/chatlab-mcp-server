@@ -10,23 +10,32 @@ describe('executeSQL', () => {
     const rows = { rows: [{ count: 42 }] }
     mockClient.post.mockResolvedValue(rows)
 
-    const result = await executeSQL(mockClient as any, 'chat_5_abc', 'SELECT count(*) FROM messages')
+    const result = await executeSQL(mockClient as any, 'chat_5_abc', 'SELECT count(*) FROM message')
 
     expect(mockClient.post).toHaveBeenCalledWith('/api/v1/sessions/chat_5_abc/sql', {
-      query: 'SELECT count(*) FROM messages',
+      query: 'SELECT count(*) FROM message LIMIT 200',
     })
     expect(JSON.parse(result)).toEqual(rows)
   })
 
+  it('does not inject LIMIT when query already has one', async () => {
+    mockClient.post.mockResolvedValue({ rows: [] })
+
+    await executeSQL(mockClient as any, 'chat_5_abc', 'SELECT * FROM message LIMIT 10')
+
+    const { query } = mockClient.post.mock.calls[0][1] as { query: string }
+    expect(query.toUpperCase().match(/LIMIT/g)?.length).toBe(1)
+  })
+
   it('rejects non-SELECT queries', async () => {
     await expect(
-      executeSQL(mockClient as any, 'chat_5_abc', 'DROP TABLE messages')
+      executeSQL(mockClient as any, 'chat_5_abc', 'DROP TABLE message')
     ).rejects.toThrow('Only SELECT queries are allowed')
   })
 
   it('rejects DELETE with leading whitespace', async () => {
     await expect(
-      executeSQL(mockClient as any, 'chat_5_abc', '  DELETE FROM messages')
+      executeSQL(mockClient as any, 'chat_5_abc', '  DELETE FROM message')
     ).rejects.toThrow('Only SELECT queries are allowed')
   })
 
