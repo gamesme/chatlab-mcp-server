@@ -10,9 +10,6 @@
   "files": [
     "dist"
   ],
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
@@ -31,8 +28,8 @@
     "vitest": "^2.1.0"
   },
   "publishConfig": {
-		"registry": "https://registry.npmjs.org",
-		"access": "public",
-		"provenance": true
-	}
+    "registry": "https://registry.npmjs.org",
+    "access": "public",
+    "provenance": true
+  }
 }
