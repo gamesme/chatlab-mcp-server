@@ -37,8 +37,8 @@ export async function getConversationText(
     page: '1',
   }
 
-  if (start_time !== undefined) query.start_time = String(start_time)
-  if (end_time !== undefined) query.end_time = String(end_time)
+  if (start_time !== undefined) query.startTime = String(start_time)
+  if (end_time !== undefined) query.endTime = String(end_time)
   if (sender_id !== undefined) query.sender_id = sender_id
 
   const result: any = await client.get(`/api/v1/sessions/${sessionId}/messages`, query)

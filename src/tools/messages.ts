@@ -32,8 +32,8 @@ export async function getMessages(
   const { session_id, format = 'text', merge_consecutive, filter_invalid, ...filters } = params
   const query: Record<string, string> = {}
   if (filters.keyword !== undefined) query.keyword = filters.keyword
-  if (filters.start_time !== undefined) query.start_time = String(filters.start_time)
-  if (filters.end_time !== undefined) query.end_time = String(filters.end_time)
+  if (filters.start_time !== undefined) query.startTime = String(filters.start_time)
+  if (filters.end_time !== undefined) query.endTime = String(filters.end_time)
   if (filters.sender_id !== undefined) query.sender_id = filters.sender_id
   if (filters.type !== undefined) query.type = String(filters.type)
   if (filters.page !== undefined) query.page = String(filters.page)
