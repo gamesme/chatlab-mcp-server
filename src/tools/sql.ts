@@ -19,7 +19,7 @@ export async function executeSQL(
   if (!query.trim().toUpperCase().startsWith('SELECT')) {
     throw new Error('Only SELECT queries are allowed.')
   }
-  const result = await client.post(`/api/v1/sessions/${sessionId}/sql`, { query: injectLimit(query) })
+  const result = await client.post(`/api/v1/sessions/${sessionId}/sql`, { sql: injectLimit(query) })
   return JSON.stringify(result, null, 2)
 }
 

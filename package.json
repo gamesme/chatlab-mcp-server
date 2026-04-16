@@ -1,6 +1,6 @@
 {
   "name": "@gamesme/chatlab-mcp-server",
-  "version": "0.14.0",
+  "version": "0.17.2",
   "description": "MCP server for ChatLab chat history",
   "type": "module",
   "main": "dist/index.js",

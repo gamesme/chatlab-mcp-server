@@ -44,8 +44,10 @@ export async function getMessages(
   if (result.data?.messages) {
     const { total, page: p = 1, messages } = result.data
 
-    // 处理消息数据
-    const processedMessages = messages.map(({ senderAvatar, senderAliases, senderId, senderPlatformId, id, replyToMessageId, ...msg }: any) => msg)
+    // 处理消息数据并按时间升序排序（API 返回降序）
+    const processedMessages = messages
+      .map(({ senderAvatar, senderAliases, senderId, senderPlatformId, id, replyToMessageId, ...msg }: any) => msg)
+      .sort((a: any, b: any) => a.timestamp - b.timestamp)
 
     // text 格式：返回纯文本对话
     if (format === 'text') {

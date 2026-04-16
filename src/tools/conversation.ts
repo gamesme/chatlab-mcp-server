@@ -47,11 +47,13 @@ export async function getConversationText(
     return 'No messages found.'
   }
 
-  const messages = result.data.messages.map((m: any) => ({
-    senderName: m.senderName,
-    content: m.content,
-    timestamp: m.timestamp,
-  }))
+  const messages = result.data.messages
+    .map((m: any) => ({
+      senderName: m.senderName,
+      content: m.content,
+      timestamp: m.timestamp,
+    }))
+    .sort((a: any, b: any) => a.timestamp - b.timestamp)
 
   const plainText = formatMessagesAsPlainText(messages, {
     mergeConsecutive: merge_consecutive,
@@ -152,6 +154,9 @@ export function registerConversationTools(server: McpServer, client: ChatLabClie
 
           page++
         }
+
+        // 按时间戳升序排序（API 返回降序）
+        allMessages.sort((a, b) => a.timestamp - b.timestamp)
 
         const plainText = formatMessagesAsPlainText(allMessages, {
           mergeConsecutive: merge_consecutive,
