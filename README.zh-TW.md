@@ -4,7 +4,7 @@
 
 將 [ChatLab](https://github.com/hellodigua/ChatLab) 接入 AI 助手（Claude Desktop、Cursor、自訂 Agent）的 MCP 伺服器。用自然語言查詢本地聊天記錄。
 
-> 跟隨 ChatLab v0.14.0
+> 跟隨 ChatLab v0.17.2
 
 ## 前置需求
 

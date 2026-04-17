@@ -4,7 +4,7 @@
 
 [ChatLab](https://github.com/hellodigua/ChatLab) を AI アシスタント（Claude Desktop、Cursor、カスタムエージェント）に接続する MCP サーバーです。自然言語でローカルのチャット履歴を検索できます。
 
-> ChatLab v0.14.0 に対応
+> ChatLab v0.17.2 に対応
 
 ## 必要条件
 

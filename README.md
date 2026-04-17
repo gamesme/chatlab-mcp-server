@@ -4,7 +4,7 @@
 
 MCP server that connects [ChatLab](https://github.com/hellodigua/ChatLab) to AI assistants (Claude Desktop, Cursor, custom agents). Query your local chat history with natural language.
 
-> Tracks ChatLab v0.14.0
+> Tracks ChatLab v0.17.2
 
 ## Requirements
 
