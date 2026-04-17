@@ -21,6 +21,7 @@ const getMessagesSchema = z.object({
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default, compact to save tokens) or json'),
   merge_consecutive: z.boolean().optional().describe('Merge consecutive messages from same sender (text format only, default: true)'),
   filter_invalid: z.boolean().optional().describe('Filter meaningless messages like stickers, system messages (text format only, default: true)'),
+  timezone: z.string().optional().describe('Timezone for time display, e.g., "Asia/Shanghai", "America/New_York", "UTC" (default: Asia/Shanghai)'),
 })
 
 type GetMessagesParams = z.infer<typeof getMessagesSchema>
@@ -29,7 +30,7 @@ export async function getMessages(
   client: Pick<ChatLabClient, 'get'>,
   params: GetMessagesParams
 ): Promise<string> {
-  const { session_id, format = 'text', merge_consecutive, filter_invalid, ...filters } = params
+  const { session_id, format = 'text', merge_consecutive, filter_invalid, timezone = 'Asia/Shanghai', ...filters } = params
   const query: Record<string, string> = {}
   if (filters.keyword !== undefined) query.keyword = filters.keyword
   if (filters.start_time !== undefined) query.startTime = String(filters.start_time)
@@ -60,6 +61,7 @@ export async function getMessages(
       const plainText = formatMessagesAsPlainText(formattedMessages, {
         mergeConsecutive: merge_consecutive ?? true,
         filterInvalid: filter_invalid ?? true,
+        timezone,
       })
 
       // 构造和主项目类似的 details 结构

@@ -116,10 +116,11 @@ export function truncateContent(content: string, maxLength: number = MAX_CONTENT
  */
 export function formatMessageCompact(
   msg: FormattedMessage,
-  locale: string = 'zh-CN'
+  locale: string = 'zh-CN',
+  timezone: string = 'Asia/Shanghai'
 ): string {
   const time = new Date(msg.timestamp * 1000).toLocaleString(locale, {
-    timeZone: 'Asia/Shanghai',
+    timeZone: timezone,
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -160,10 +161,11 @@ export function mergeConsecutiveMessages(
  */
 function formatMergedMessage(
   merged: { senderName: string; contents: string[]; timestamp: number },
-  locale: string = 'zh-CN'
+  locale: string = 'zh-CN',
+  timezone: string = 'Asia/Shanghai'
 ): string {
   const time = new Date(merged.timestamp * 1000).toLocaleString(locale, {
-    timeZone: 'Asia/Shanghai',
+    timeZone: timezone,
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -184,9 +186,10 @@ export function formatMessagesAsPlainText(
     locale?: string
     mergeConsecutive?: boolean
     filterInvalid?: boolean
+    timezone?: string
   } = {}
 ): string {
-  const { locale = 'zh-CN', mergeConsecutive = true, filterInvalid = true } = options
+  const { locale = 'zh-CN', mergeConsecutive = true, filterInvalid = true, timezone = 'Asia/Shanghai' } = options
 
   if (messages.length === 0) return ''
 
@@ -206,10 +209,10 @@ export function formatMessagesAsPlainText(
   // 格式化
   if (mergeConsecutive) {
     const merged = mergeConsecutiveMessages(processed)
-    return merged.map((m) => formatMergedMessage(m, locale)).join('\n')
+    return merged.map((m) => formatMergedMessage(m, locale, timezone)).join('\n')
   } else {
     return processed
-      .map((m) => formatMessageCompact({ ...m, content: m.content }, locale))
+      .map((m) => formatMessageCompact({ ...m, content: m.content }, locale, timezone))
       .join('\n')
   }
 }
