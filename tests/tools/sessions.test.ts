@@ -15,7 +15,7 @@ describe('listSessions', () => {
     }
     mockClient.get.mockResolvedValue(raw)
 
-    const result = await listSessions(mockClient as any)
+    const result = await listSessions(mockClient as any, 'json')
     const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions')
@@ -41,7 +41,7 @@ describe('getSession', () => {
     }
     mockClient.get.mockResolvedValue(raw)
 
-    const result = await getSession(mockClient as any, 'chat_42_abc')
+    const result = await getSession(mockClient as any, 'chat_42_abc', 'json')
     const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_42_abc')

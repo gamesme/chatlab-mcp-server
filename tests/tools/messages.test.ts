@@ -34,8 +34,8 @@ describe('getMessages', () => {
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_5_abc/messages', {
       keyword: 'hello',
-      start_time: '1700000000',
-      end_time: '1700100000',
+      startTime: '1700000000',
+      endTime: '1700100000',
       sender_id: 'user123',
       type: '1',
       page: '2',
@@ -60,14 +60,14 @@ describe('getMessages', () => {
     const params = mockClient.get.mock.calls[0][1]
     expect(params).not.toHaveProperty('keyword')
     expect(params).not.toHaveProperty('sender_id')
-    expect(params).not.toHaveProperty('start_time')
+    expect(params).not.toHaveProperty('startTime')
   })
 
   it('returns JSON string of response', async () => {
     const page = { messages: [{ id: 1 }], total: 1 }
     mockClient.get.mockResolvedValue(page)
 
-    const result = await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
+    const result = await getMessages(mockClient as any, { session_id: 'chat_5_abc', format: 'json' })
     expect(JSON.parse(result)).toEqual(page)
   })
 
@@ -76,7 +76,7 @@ describe('getMessages', () => {
       data: { messages: [{ id: 1 }, { id: 2 }], total: 500, page: 1 },
     })
 
-    const result = JSON.parse(await getMessages(mockClient as any, { session_id: 'chat_5_abc' }))
+    const result = JSON.parse(await getMessages(mockClient as any, { session_id: 'chat_5_abc', format: 'json' }))
     expect(result.data.has_more).toBe(true)
     expect(result.data.hint).toMatch(/page=2/)
   })

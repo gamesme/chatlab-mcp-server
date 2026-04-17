@@ -7,7 +7,7 @@ describe('getStatsOverview', () => {
   it('calls stats/overview endpoint with session id', async () => {
     mockClient.get.mockResolvedValue({ data: { messageCount: 1500 } })
 
-    const result = await getStatsOverview(mockClient as any, 'chat_7_abc')
+    const result = await getStatsOverview(mockClient as any, 'chat_7_abc', 'json')
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_7_abc/stats/overview')
     expect(JSON.parse(result).data.messageCount).toBe(1500)
@@ -18,7 +18,7 @@ describe('getStatsOverview', () => {
       data: { messageTypeDistribution: { '0': 100, '1': 20, '99': 5 } },
     })
 
-    const result = JSON.parse(await getStatsOverview(mockClient as any, 'chat_7_abc'))
+    const result = JSON.parse(await getStatsOverview(mockClient as any, 'chat_7_abc', 'json'))
     const dist = result.data.messageTypeDistribution
 
     expect(dist).toHaveProperty('text', 100)

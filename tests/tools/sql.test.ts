@@ -13,7 +13,7 @@ describe('executeSQL', () => {
     const result = await executeSQL(mockClient as any, 'chat_5_abc', 'SELECT count(*) FROM message')
 
     expect(mockClient.post).toHaveBeenCalledWith('/api/v1/sessions/chat_5_abc/sql', {
-      query: 'SELECT count(*) FROM message LIMIT 200',
+      sql: 'SELECT count(*) FROM message LIMIT 200',
     })
     expect(JSON.parse(result)).toEqual(rows)
   })
@@ -23,8 +23,8 @@ describe('executeSQL', () => {
 
     await executeSQL(mockClient as any, 'chat_5_abc', 'SELECT * FROM message LIMIT 10')
 
-    const { query } = mockClient.post.mock.calls[0][1] as { query: string }
-    expect(query.toUpperCase().match(/LIMIT/g)?.length).toBe(1)
+    const { sql } = mockClient.post.mock.calls[0][1] as { sql: string }
+    expect(sql.toUpperCase().match(/LIMIT/g)?.length).toBe(1)
   })
 
   it('rejects non-SELECT queries', async () => {

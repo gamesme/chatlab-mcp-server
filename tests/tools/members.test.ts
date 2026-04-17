@@ -11,7 +11,7 @@ describe('getMembers', () => {
     }
     mockClient.get.mockResolvedValue(raw)
 
-    const result = await getMembers(mockClient as any, 'chat_3_abc')
+    const result = await getMembers(mockClient as any, 'chat_3_abc', 'json')
     const parsed = JSON.parse(result)
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_3_abc/members')
