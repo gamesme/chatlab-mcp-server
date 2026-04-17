@@ -119,6 +119,7 @@ export function formatMessageCompact(
   locale: string = 'zh-CN'
 ): string {
   const time = new Date(msg.timestamp * 1000).toLocaleString(locale, {
+    timeZone: 'Asia/Shanghai',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -162,6 +163,7 @@ function formatMergedMessage(
   locale: string = 'zh-CN'
 ): string {
   const time = new Date(merged.timestamp * 1000).toLocaleString(locale, {
+    timeZone: 'Asia/Shanghai',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
