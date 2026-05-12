@@ -568,6 +568,68 @@ export async function getMemberNameHistory(
   return formatToolResultAsText({ member_id, total: rows.length, history: lines })
 }
 
+const getResponseTimeSchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  top_n: z.number().optional().describe('Top N (from, to) pairs (default 10, max 50)'),
+  start_time: z.number().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+})
+
+export type GetResponseTimeParams = z.infer<typeof getResponseTimeSchema>
+
+export async function getResponseTimeAnalysis(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetResponseTimeParams
+): Promise<string> {
+  const { session_id, start_time, end_time, format = 'text' } = params
+  const topN = Math.min(Math.max(params.top_n ?? 10, 1), 50)
+
+  const sql = `
+    WITH ordered AS (
+      SELECT ts, sender_id,
+             LAG(ts) OVER (ORDER BY ts) AS prev_ts,
+             LAG(sender_id) OVER (ORDER BY ts) AS prev_sender
+      FROM message
+      WHERE 1=1 ${buildTimeFilter(start_time, end_time, 'ts')}
+    )
+    SELECT prev_sender AS from_id,
+           sender_id   AS to_id,
+           COALESCE(m_from.group_nickname, m_from.account_name, m_from.platform_id) AS from_name,
+           COALESCE(m_to.group_nickname,   m_to.account_name,   m_to.platform_id)   AS to_name,
+           COUNT(*)             AS reply_count,
+           MIN(ts - prev_ts)    AS min_seconds,
+           ROUND(AVG(ts - prev_ts), 2) AS avg_seconds,
+           MAX(ts - prev_ts)    AS max_seconds
+    FROM ordered
+    LEFT JOIN member m_from ON m_from.id = prev_sender
+    LEFT JOIN member m_to   ON m_to.id   = sender_id
+    WHERE prev_sender IS NOT NULL
+      AND prev_sender <> sender_id
+      AND (ts - prev_ts) BETWEEN 1 AND 3600
+    GROUP BY from_id, to_id
+    ORDER BY reply_count DESC
+    LIMIT ${topN}
+  `.trim()
+
+  const rows = await sqlInternal(client, session_id, sql)
+
+  if (format === 'json') {
+    return JSON.stringify({ topN, count: rows.length, pairs: rows }, null, 2)
+  }
+
+  if (rows.length === 0) {
+    return 'No reply pairs found in the given range.'
+  }
+
+  const lines = rows.map(
+    (r, i) =>
+      `${i + 1}. ${r.from_name} → ${r.to_name}: ${r.reply_count} replies (min=${r.min_seconds}s, avg=${r.avg_seconds}s, max=${r.max_seconds}s)`
+  )
+
+  return formatToolResultAsText({ topN, returned: rows.length, pairs: lines })
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -660,6 +722,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await getMemberNameHistory(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'get_response_time_analysis',
+    'Reply intervals between consecutive messages from different senders, grouped by (from, to) pair. Excludes same-sender continuations and gaps over 1 hour. Use for "who responds fastest" type questions.',
+    getResponseTimeSchema.shape,
+    async (args) => {
+      try {
+        const text = await getResponseTimeAnalysis(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)

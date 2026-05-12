@@ -12,6 +12,7 @@ import { deepSearchMessages } from '../../src/tools/analytics.js'
 import { getTimeStats } from '../../src/tools/analytics.js'
 import { getMemberActivity } from '../../src/tools/analytics.js'
 import { getMemberNameHistory } from '../../src/tools/analytics.js'
+import { getResponseTimeAnalysis } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -500,5 +501,48 @@ describe('get_member_name_history', () => {
       session_id: 's1', member_id: 99, format: 'text',
     })
     expect(out).toMatch(/no.*history|not found/i)
+  })
+})
+
+describe('get_response_time_analysis', () => {
+  it('uses LAG window function and excludes same-sender pairs', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getResponseTimeAnalysis(mockClient as any, { session_id: 's1', format: 'json' })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/LAG\(ts\)/)
+    expect(sql).toMatch(/LAG\(sender_id\)/)
+    expect(sql).toMatch(/prev_sender <> sender_id/)
+    expect(sql).toMatch(/BETWEEN 1 AND 3600/)
+  })
+
+  it('joins member table for names', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getResponseTimeAnalysis(mockClient as any, { session_id: 's1', format: 'json' })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/JOIN member/)
+  })
+
+  it('defaults top_n to 10, caps at 50', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getResponseTimeAnalysis(mockClient as any, { session_id: 's1', format: 'json' })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 10/)
+
+    mockClient.post.mockClear()
+    await getResponseTimeAnalysis(mockClient as any, { session_id: 's1', top_n: 9999, format: 'json' })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 50/)
+  })
+
+  it('formats text output with from→to and timings', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [{
+        from_id: 1, to_id: 2,
+        from_name: 'Alice', to_name: 'Bob',
+        reply_count: 100, min_seconds: 5, avg_seconds: 120.5, max_seconds: 3500,
+      }] },
+    })
+    const out = await getResponseTimeAnalysis(mockClient as any, { session_id: 's1', format: 'text' })
+    expect(out).toMatch(/Alice/)
+    expect(out).toMatch(/Bob/)
+    expect(out).toMatch(/100/)
   })
 })
