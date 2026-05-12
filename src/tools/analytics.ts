@@ -469,6 +469,61 @@ export async function getTimeStats(
   return formatToolResultAsText(details)
 }
 
+const getMemberActivitySchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  top_n: z.number().optional().describe('Top N members (default 10, max 50)'),
+  start_time: z.number().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+})
+
+export type GetMemberActivityParams = z.infer<typeof getMemberActivitySchema>
+
+export async function getMemberActivity(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetMemberActivityParams
+): Promise<string> {
+  const { session_id, start_time, end_time, format = 'text' } = params
+  const topN = Math.min(Math.max(params.top_n ?? 10, 1), 50)
+
+  const sql = `
+    WITH counts AS (
+      SELECT m.sender_id, COUNT(*) AS msg_count
+      FROM message m
+      WHERE 1=1 ${buildTimeFilter(start_time, end_time, 'm.ts')}
+      GROUP BY m.sender_id
+    ), total AS (
+      SELECT COALESCE(SUM(msg_count), 0) AS t FROM counts
+    )
+    SELECT mem.id, mem.platform_id, mem.account_name, mem.group_nickname,
+           c.msg_count,
+           CASE WHEN total.t = 0 THEN 0
+                ELSE ROUND(c.msg_count * 100.0 / total.t, 2) END AS percentage
+    FROM counts c
+    JOIN member mem ON mem.id = c.sender_id
+    CROSS JOIN total
+    ORDER BY c.msg_count DESC
+    LIMIT ${topN}
+  `.trim()
+
+  const rows = await sqlInternal(client, session_id, sql)
+
+  if (format === 'json') {
+    return JSON.stringify({ topN, count: rows.length, members: rows }, null, 2)
+  }
+
+  if (rows.length === 0) {
+    return 'No members with messages in the given range.'
+  }
+
+  const lines = rows.map((r, i) => {
+    const name = r.group_nickname || r.account_name || r.platform_id
+    return `${i + 1}. ${name} (id=${r.id}) - ${r.msg_count} msgs (${r.percentage}%)`
+  })
+
+  return formatToolResultAsText({ topN, returned: rows.length, members: lines })
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -533,6 +588,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await getTimeStats(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'get_member_activity',
+    'Top members ranked by message count with percentage of total. Use for "who talks the most" or "most active members" type questions. Supports top_n and time filters.',
+    getMemberActivitySchema.shape,
+    async (args) => {
+      try {
+        const text = await getMemberActivity(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)

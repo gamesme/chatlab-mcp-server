@@ -10,6 +10,7 @@ import { getConversationBetween } from '../../src/tools/analytics.js'
 import { getSessionSummaries } from '../../src/tools/analytics.js'
 import { deepSearchMessages } from '../../src/tools/analytics.js'
 import { getTimeStats } from '../../src/tools/analytics.js'
+import { getMemberActivity } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -425,5 +426,42 @@ describe('get_time_stats', () => {
     })
     expect(out).toMatch(/total: 0/)
     expect(out).toMatch(/type: hourly/)
+  })
+})
+
+describe('get_member_activity', () => {
+  it('uses CTE with percentage', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getMemberActivity(mockClient as any, { session_id: 's1', format: 'json' })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/WITH counts AS/)
+    expect(sql).toMatch(/JOIN member/)
+    expect(sql).toMatch(/percentage/)
+    expect(sql).toMatch(/ORDER BY c\.msg_count DESC/)
+  })
+
+  it('caps top_n at 50', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getMemberActivity(mockClient as any, { session_id: 's1', top_n: 9999, format: 'json' })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 50/)
+  })
+
+  it('defaults top_n to 10', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getMemberActivity(mockClient as any, { session_id: 's1', format: 'json' })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 10/)
+  })
+
+  it('formats text output with rank/name/count/percent', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [
+        { id: 1, platform_id: 'a', account_name: 'Alice', group_nickname: null, msg_count: 100, percentage: 50.0 },
+        { id: 2, platform_id: 'b', account_name: null, group_nickname: 'Bob', msg_count: 100, percentage: 50.0 },
+      ] },
+    })
+    const out = await getMemberActivity(mockClient as any, { session_id: 's1', format: 'text' })
+    expect(out).toMatch(/Alice/)
+    expect(out).toMatch(/Bob/)
+    expect(out).toMatch(/50/)
   })
 })
