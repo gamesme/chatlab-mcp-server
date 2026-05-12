@@ -324,4 +324,16 @@ describe('deep_search_messages', () => {
     })
     expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 1000/)
   })
+
+  it('runs the context query even when context_before=0 and context_after=0', async () => {
+    mockClient.post
+      .mockResolvedValueOnce({ data: { rows: [{ id: 50, ts: 1000 }] } })
+      .mockResolvedValueOnce({ data: { rows: [{ id: 50, ts: 1000, content: 'hit', senderName: 'A' }] } })
+    await deepSearchMessages(mockClient as any, {
+      session_id: 's1', keywords: ['x'], context_before: 0, context_after: 0, format: 'json',
+    })
+    expect(mockClient.post).toHaveBeenCalledTimes(2)
+    const ctxSql = mockClient.post.mock.calls[1][1].sql as string
+    expect(ctxSql).toMatch(/m\.id BETWEEN 50 AND 50/)
+  })
 })

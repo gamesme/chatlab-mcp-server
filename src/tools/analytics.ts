@@ -334,7 +334,7 @@ export async function deepSearchMessages(
     WHERE message_fts MATCH '${sqlEscape(matchExpr)}'
       ${senderClause}
       ${buildTimeFilter(start_time, end_time, 'm.ts')}
-    ORDER BY m.ts
+    ORDER BY m.ts, m.id
     LIMIT ${limit}
   `.trim()
 
@@ -350,10 +350,6 @@ export async function deepSearchMessages(
   if (hits.length === 0) {
     const msg = `No matches for keywords: ${keywords.join(', ')}`
     return format === 'json' ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2) : msg
-  }
-
-  if (before === 0 && after === 0) {
-    return formatRowsAsConversation(hits, format, timezone, { total: hits.length })
   }
 
   const ranges = hits
