@@ -91,7 +91,7 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 | `get_stats_overview` | Statistical overview: message counts, member activity, type distribution, time range |
 | `execute_sql` | Run aggregation queries (COUNT/GROUP BY) against the session database |
 
-### Analytics (v0.18.0+, 9)
+### Analytics (v0.19.0+, 9)
 | Tool | Description |
 |------|-------------|
 | `get_message_context` | N messages before/after one or more target message IDs |

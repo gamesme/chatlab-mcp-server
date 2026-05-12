@@ -91,7 +91,7 @@ npm install && npm run build
 | `get_stats_overview` | 統計概要：メッセージ数・メンバー活動・メッセージ種別分布・期間 |
 | `execute_sql` | セッション DB に対して集計クエリ（COUNT/GROUP BY）を実行 |
 
-### 分析 (v0.18.0+、9個)
+### 分析 (v0.19.0+、9個)
 | ツール | 説明 |
 |--------|------|
 | `get_message_context` | 対象メッセージの前後 N 件のコンテキスト |

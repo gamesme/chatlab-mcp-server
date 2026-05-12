@@ -91,7 +91,7 @@ npm install && npm run build
 | `get_stats_overview` | 统计概览：消息数、成员活跃度、消息类型分布、时间范围 |
 | `execute_sql` | 对会话数据库执行聚合查询（COUNT/GROUP BY） |
 
-### 分析 (v0.18.0+，9 个)
+### 分析 (v0.19.0+，9 个)
 | 工具 | 说明 |
 |------|------|
 | `get_message_context` | 获取目标消息前后 N 条上下文 |
