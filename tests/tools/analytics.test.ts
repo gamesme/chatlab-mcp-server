@@ -13,6 +13,7 @@ import { getTimeStats } from '../../src/tools/analytics.js'
 import { getMemberActivity } from '../../src/tools/analytics.js'
 import { getMemberNameHistory } from '../../src/tools/analytics.js'
 import { getResponseTimeAnalysis } from '../../src/tools/analytics.js'
+import { keywordFrequency } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -544,5 +545,25 @@ describe('get_response_time_analysis', () => {
     expect(out).toMatch(/Alice/)
     expect(out).toMatch(/Bob/)
     expect(out).toMatch(/100/)
+  })
+})
+
+describe('keyword_frequency', () => {
+  it('does not call the API', async () => {
+    await keywordFrequency({ session_id: 's1', format: 'text' })
+    expect(mockClient.post).not.toHaveBeenCalled()
+  })
+
+  it('returns text describing the limitation and alternatives', async () => {
+    const out = await keywordFrequency({ session_id: 's1', format: 'text' })
+    expect(out).toMatch(/not implemented|segmentation|jieba/i)
+    expect(out).toMatch(/execute_sql|LIKE/i)
+  })
+
+  it('returns JSON with message and alternatives when format=json', async () => {
+    const out = await keywordFrequency({ session_id: 's1', format: 'json' })
+    const data = JSON.parse(out)
+    expect(typeof data.message).toBe('string')
+    expect(Array.isArray(data.available_alternatives)).toBe(true)
   })
 })
