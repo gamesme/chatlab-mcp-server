@@ -394,6 +394,80 @@ function formatRowsAsConversation(
   return formatToolResultAsText({ ...extra, returned: rows.length, messages: lines })
 }
 
+const WEEKDAY_NAMES_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+const getTimeStatsSchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  type: z.enum(['hourly', 'weekday', 'daily']).describe('Bucket granularity'),
+  start_time: z.number().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+  timezone: z.string().optional().describe('Timezone for bucketing (default Asia/Shanghai)'),
+})
+
+export type GetTimeStatsParams = z.infer<typeof getTimeStatsSchema>
+
+export async function getTimeStats(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetTimeStatsParams
+): Promise<string> {
+  const { session_id, type, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
+  const tsExpr = localTsExpr(timezone)
+  let bucketExpr: string
+  switch (type) {
+    case 'hourly':
+      bucketExpr = `CAST(strftime('%H', ${tsExpr}, 'unixepoch') AS INTEGER)`
+      break
+    case 'weekday':
+      bucketExpr = `CAST(strftime('%w', ${tsExpr}, 'unixepoch') AS INTEGER)`
+      break
+    case 'daily':
+      bucketExpr = `date(${tsExpr}, 'unixepoch')`
+      break
+  }
+
+  const sql = `
+    SELECT ${bucketExpr} AS bucket, COUNT(*) AS count
+    FROM message
+    WHERE 1=1 ${buildTimeFilter(start_time, end_time, 'ts')}
+    GROUP BY bucket
+    ORDER BY bucket
+  `.trim()
+
+  const rows = await sqlInternal(client, session_id, sql)
+
+  if (format === 'json') {
+    return JSON.stringify({ type, timezone, rows }, null, 2)
+  }
+
+  if (rows.length === 0) {
+    return 'No messages in the given range.'
+  }
+
+  const peak = rows.reduce((max, r) => (r.count > max.count ? r : max), rows[0])
+
+  const details: Record<string, unknown> = { type, timezone }
+  const distribution: string[] = []
+
+  if (type === 'hourly') {
+    const fmt = (n: number) => `${String(n).padStart(2, '0')}:00`
+    details.peakHour = `${fmt(peak.bucket)} (${peak.count})`
+    for (const r of rows) distribution.push(`${fmt(r.bucket)} ${r.count}`)
+  } else if (type === 'weekday') {
+    details.peakDay = `${WEEKDAY_NAMES_EN[peak.bucket]} (${peak.count})`
+    for (const r of rows) distribution.push(`${WEEKDAY_NAMES_EN[r.bucket]} ${r.count}`)
+  } else {
+    const total = rows.reduce((s, r) => s + (r.count as number), 0)
+    details.days = rows.length
+    details.total = total
+    details.dailyAvg = Math.round(total / rows.length)
+    for (const r of rows) distribution.push(`${r.bucket} ${r.count}`)
+  }
+  details.distribution = distribution
+
+  return formatToolResultAsText(details)
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -444,6 +518,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await deepSearchMessages(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'get_time_stats',
+    'Get message count distribution bucketed by hour, weekday, or day. Use for "when are people most active" type questions. Timezone-aware bucketing.',
+    getTimeStatsSchema.shape,
+    async (args) => {
+      try {
+        const text = await getTimeStats(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)

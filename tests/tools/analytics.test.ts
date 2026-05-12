@@ -9,6 +9,7 @@ import {
 import { getConversationBetween } from '../../src/tools/analytics.js'
 import { getSessionSummaries } from '../../src/tools/analytics.js'
 import { deepSearchMessages } from '../../src/tools/analytics.js'
+import { getTimeStats } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -335,5 +336,68 @@ describe('deep_search_messages', () => {
     expect(mockClient.post).toHaveBeenCalledTimes(2)
     const ctxSql = mockClient.post.mock.calls[1][1].sql as string
     expect(ctxSql).toMatch(/m\.id BETWEEN 50 AND 50/)
+  })
+})
+
+describe('get_time_stats', () => {
+  it('hourly groups by strftime %H on localized ts', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'hourly', timezone: 'Asia/Shanghai', format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/strftime\('%H'/)
+    expect(sql).toMatch(/\(ts \+ 28800\)/)
+    expect(sql).toMatch(/GROUP BY bucket/)
+  })
+
+  it('weekday groups by strftime %w', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'weekday', format: 'json',
+    })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/strftime\('%w'/)
+  })
+
+  it('daily groups by date()', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'daily', format: 'json',
+    })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/date\(/)
+  })
+
+  it('formats hourly text output with peak hour', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [
+        { bucket: 9, count: 100 },
+        { bucket: 21, count: 500 },
+      ] },
+    })
+    const out = await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'hourly', format: 'text',
+    })
+    expect(out).toMatch(/peakHour: 21:00/)
+    expect(out).toMatch(/500/)
+  })
+
+  it('formats weekday text output with weekday names', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [{ bucket: 1, count: 50 }, { bucket: 0, count: 200 }] },
+    })
+    const out = await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'weekday', format: 'text',
+    })
+    expect(out).toMatch(/Sunday/i)
+    expect(out).toMatch(/200/)
+  })
+
+  it('applies time filter', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'hourly',
+      start_time: 1700000000, end_time: 1700100000, format: 'json',
+    })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/ts >= 1700000000/)
   })
 })
