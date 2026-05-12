@@ -441,7 +441,7 @@ export async function getTimeStats(
   }
 
   if (rows.length === 0) {
-    return 'No messages in the given range.'
+    return formatToolResultAsText({ type, timezone, total: 0, distribution: [] })
   }
 
   const peak = rows.reduce((max, r) => (r.count > max.count ? r : max), rows[0])
@@ -458,9 +458,10 @@ export async function getTimeStats(
     for (const r of rows) distribution.push(`${WEEKDAY_NAMES_EN[r.bucket]} ${r.count}`)
   } else {
     const total = rows.reduce((s, r) => s + (r.count as number), 0)
+    details.peakDay = `${peak.bucket} (${peak.count})`
     details.days = rows.length
     details.total = total
-    details.dailyAvg = Math.round(total / rows.length)
+    details.avgPerActiveDay = Math.round(total / rows.length)
     for (const r of rows) distribution.push(`${r.bucket} ${r.count}`)
   }
   details.distribution = distribution

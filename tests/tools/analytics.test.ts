@@ -400,4 +400,30 @@ describe('get_time_stats', () => {
     })
     expect(mockClient.post.mock.calls[0][1].sql).toMatch(/ts >= 1700000000/)
   })
+
+  it('formats daily text output with peakDay and avgPerActiveDay', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [
+        { bucket: '2025-01-01', count: 100 },
+        { bucket: '2025-01-02', count: 300 },
+        { bucket: '2025-01-03', count: 200 },
+      ] },
+    })
+    const out = await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'daily', format: 'text',
+    })
+    expect(out).toMatch(/peakDay: 2025-01-02 \(300\)/)
+    expect(out).toMatch(/days: 3/)
+    expect(out).toMatch(/total: 600/)
+    expect(out).toMatch(/avgPerActiveDay: 200/)
+  })
+
+  it('handles empty rows in text mode via formatToolResultAsText', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    const out = await getTimeStats(mockClient as any, {
+      session_id: 's1', type: 'hourly', format: 'text',
+    })
+    expect(out).toMatch(/total: 0/)
+    expect(out).toMatch(/type: hourly/)
+  })
 })
