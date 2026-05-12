@@ -291,6 +291,113 @@ export async function getSessionSummaries(
   })
 }
 
+const deepSearchSchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  keywords: z.array(z.string()).min(1).describe('Keywords to search (FTS5 MATCH, joined by OR)'),
+  sender_id: z.number().optional().describe('Restrict to a specific sender (numeric member.id)'),
+  start_time: z.number().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  limit: z.number().optional().describe('Max hits before context expansion (default 100, max 1000)'),
+  context_before: z.number().optional().describe('Context messages before each hit (default 2, max 20)'),
+  context_after: z.number().optional().describe('Context messages after each hit (default 2, max 20)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
+})
+
+export type DeepSearchParams = z.infer<typeof deepSearchSchema>
+
+function ftsEscape(keyword: string): string {
+  // FTS5 quoted phrases — embedded double quotes are doubled.
+  return `"${keyword.replace(/"/g, '""')}"`
+}
+
+export async function deepSearchMessages(
+  client: Pick<ChatLabClient, 'post'>,
+  params: DeepSearchParams
+): Promise<string> {
+  const { session_id, keywords, sender_id, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
+  const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000)
+  const before = Math.min(Math.max(params.context_before ?? 2, 0), 20)
+  const after = Math.min(Math.max(params.context_after ?? 2, 0), 20)
+
+  const matchExpr = keywords.map(ftsEscape).join(' OR ')
+
+  let senderClause = ''
+  if (sender_id !== undefined && Number.isFinite(sender_id)) {
+    senderClause = ` AND m.sender_id = ${Math.floor(sender_id)}`
+  }
+
+  const hitsSql = `
+    SELECT m.id, m.ts
+    FROM message m
+    JOIN message_fts ON m.id = message_fts.rowid
+    WHERE message_fts MATCH '${sqlEscape(matchExpr)}'
+      ${senderClause}
+      ${buildTimeFilter(start_time, end_time, 'm.ts')}
+    ORDER BY m.ts
+    LIMIT ${limit}
+  `.trim()
+
+  let hits: any[]
+  try {
+    hits = await sqlInternal(client, session_id, hitsSql)
+  } catch (e) {
+    const hint = missingTableHint(hitsSql, e as Error)
+    if (hint) return format === 'json' ? JSON.stringify({ message: hint }, null, 2) : hint
+    throw e
+  }
+
+  if (hits.length === 0) {
+    const msg = `No matches for keywords: ${keywords.join(', ')}`
+    return format === 'json' ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2) : msg
+  }
+
+  if (before === 0 && after === 0) {
+    return formatRowsAsConversation(hits, format, timezone, { total: hits.length })
+  }
+
+  const ranges = hits
+    .map((h) => `(m.id BETWEEN ${h.id - before} AND ${h.id + after})`)
+    .join(' OR ')
+
+  const contextSql = `
+    SELECT m.id, m.ts, m.type, m.content,
+           mem.platform_id AS senderPlatformId,
+           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    FROM message m
+    LEFT JOIN member mem ON m.sender_id = mem.id
+    WHERE ${ranges}
+    ORDER BY m.id
+    LIMIT 5000
+  `.trim()
+
+  const expanded = await sqlInternal(client, session_id, contextSql)
+
+  return formatRowsAsConversation(expanded, format, timezone, {
+    hits: hits.length,
+    total: expanded.length,
+  })
+}
+
+function formatRowsAsConversation(
+  rows: any[],
+  format: 'json' | 'text',
+  timezone: string,
+  extra: Record<string, unknown>
+): string {
+  if (format === 'json') {
+    return JSON.stringify({ ...extra, returned: rows.length, rawMessages: rows }, null, 2)
+  }
+  const lines = rows.map((r) => {
+    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
+      timeZone: timezone,
+      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+    return `${time} ${r.senderName ?? '?'}: ${r.content ?? '[no content]'}`
+  })
+  return formatToolResultAsText({ ...extra, returned: rows.length, messages: lines })
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -327,6 +434,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await getSessionSummaries(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'deep_search_messages',
+    'Full-text search messages via FTS5, then expand each hit with surrounding context messages. Use for "did anyone mention X" style queries where conversation context matters.',
+    deepSearchSchema.shape,
+    async (args) => {
+      try {
+        const text = await deepSearchMessages(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)
