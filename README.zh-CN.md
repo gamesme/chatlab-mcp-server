@@ -4,7 +4,7 @@
 
 将 [ChatLab](https://github.com/hellodigua/ChatLab) 接入 AI 助手（Claude Desktop、Cursor、自定义 Agent）的 MCP 服务器。用自然语言查询本地聊天记录。
 
-> 跟随 ChatLab v0.17.2
+> 跟随 ChatLab v0.19.0
 
 ## 前置要求
 
@@ -81,6 +81,7 @@ npm install && npm run build
 
 ## 工具列表
 
+### 核心 (6 个)
 | 工具 | 说明 |
 |------|------|
 | `list_sessions` | 列出所有已导入的会话（名称、平台、消息数） |
@@ -90,10 +91,24 @@ npm install && npm run build
 | `get_stats_overview` | 统计概览：消息数、成员活跃度、消息类型分布、时间范围 |
 | `execute_sql` | 对会话数据库执行聚合查询（COUNT/GROUP BY） |
 
+### 分析 (v0.18.0+，9 个)
+| 工具 | 说明 |
+|------|------|
+| `get_message_context` | 获取目标消息前后 N 条上下文 |
+| `get_conversation_between` | 两个成员之间的对话（按时间交错） |
+| `get_session_summaries` | AI 生成的子会话摘要（来自 chat_session 表） |
+| `deep_search_messages` | FTS5 全文搜索，附带上下文窗口 |
+| `get_time_stats` | 小时/工作日/日分布（支持时区） |
+| `get_member_activity` | 按消息数排名的活跃成员（含占比） |
+| `get_member_name_history` | 成员历史昵称/账号名变更记录 |
+| `get_response_time_analysis` | 成员对的回复间隔（LAG 窗口函数） |
+| `keyword_frequency` | 占位实现（NLP 分词未打包，返回替代方案提示） |
+
 ### 注意事项
 
 - `get_messages` 每次最多返回 100 条，使用 `page` 参数翻页。有更多结果时响应中会包含 `has_more` 和 `hint` 提示。
-- `execute_sql` 仅用于统计聚合（词频、活跃分析、成员互动等），读取消息内容请使用 `get_messages`。
+- `execute_sql` 仅用于统计聚合，读取消息内容请使用 `get_messages` 或 `get_message_context`。
+- 分析类工具通过同一 `/sql` 接口下发自己的 SQL（不再注入 200 行 LIMIT）。
 - 所有头像/二进制字段已在服务端自动剥离，减少上下文占用。
 
 ## CLI 参数

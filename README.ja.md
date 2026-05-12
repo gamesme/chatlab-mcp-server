@@ -4,7 +4,7 @@
 
 [ChatLab](https://github.com/hellodigua/ChatLab) を AI アシスタント（Claude Desktop、Cursor、カスタムエージェント）に接続する MCP サーバーです。自然言語でローカルのチャット履歴を検索できます。
 
-> ChatLab v0.17.2 に対応
+> ChatLab v0.19.0 に対応
 
 ## 必要条件
 
@@ -81,6 +81,7 @@ npm install && npm run build
 
 ## ツール一覧
 
+### コア (6個)
 | ツール | 説明 |
 |--------|------|
 | `list_sessions` | インポート済みのセッション一覧（名前・プラットフォーム・メッセージ数） |
@@ -90,10 +91,24 @@ npm install && npm run build
 | `get_stats_overview` | 統計概要：メッセージ数・メンバー活動・メッセージ種別分布・期間 |
 | `execute_sql` | セッション DB に対して集計クエリ（COUNT/GROUP BY）を実行 |
 
+### 分析 (v0.18.0+、9個)
+| ツール | 説明 |
+|--------|------|
+| `get_message_context` | 対象メッセージの前後 N 件のコンテキスト |
+| `get_conversation_between` | 2 人のメンバー間の会話（時系列） |
+| `get_session_summaries` | AI 生成のサブセッション要約（chat_session テーブル由来） |
+| `deep_search_messages` | FTS5 全文検索（コンテキスト付き） |
+| `get_time_stats` | 時間帯/曜日/日別分布（タイムゾーン対応） |
+| `get_member_activity` | メッセージ数によるアクティブメンバー（割合付き） |
+| `get_member_name_history` | メンバーの過去のニックネーム/アカウント名履歴 |
+| `get_response_time_analysis` | 送信者ペアの応答間隔（LAG ウィンドウ関数） |
+| `keyword_frequency` | スタブ（NLP 分かち書きは未バンドル、代替案を返却） |
+
 ### 注意事項
 
 - `get_messages` は1回最大100件を返します。`page` パラメータでページネーションできます。残りがある場合はレスポンスに `has_more` と `hint` が含まれます。
-- `execute_sql` は統計集計専用です（単語頻度・活動分析・メンバー間のやり取りなど）。メッセージ内容の取得には `get_messages` を使用してください。
+- `execute_sql` は統計集計専用です。メッセージ内容の取得には `get_messages` または `get_message_context` を使用してください。
+- 分析系ツールは同じ `/sql` エンドポイント経由で独自の SQL を発行します（200 行 LIMIT は注入されません）。
 - アバター・バイナリフィールドはサーバー側で自動的に除去され、コンテキスト消費を抑えます。
 
 ## CLI オプション

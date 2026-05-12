@@ -4,7 +4,7 @@
 
 MCP server that connects [ChatLab](https://github.com/hellodigua/ChatLab) to AI assistants (Claude Desktop, Cursor, custom agents). Query your local chat history with natural language.
 
-> Tracks ChatLab v0.17.2
+> Tracks ChatLab v0.19.0
 
 ## Requirements
 
@@ -81,6 +81,7 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 
 ## Tools
 
+### Core (6)
 | Tool | Description |
 |------|-------------|
 | `list_sessions` | List all imported chat sessions with name, platform, and message count |
@@ -90,10 +91,24 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 | `get_stats_overview` | Statistical overview: message counts, member activity, type distribution, time range |
 | `execute_sql` | Run aggregation queries (COUNT/GROUP BY) against the session database |
 
+### Analytics (v0.18.0+, 9)
+| Tool | Description |
+|------|-------------|
+| `get_message_context` | N messages before/after one or more target message IDs |
+| `get_conversation_between` | Interleaved messages between two specific members (numeric IDs) |
+| `get_session_summaries` | AI-generated chat sub-session summaries (from the chat_session table) |
+| `deep_search_messages` | FTS5 keyword search with surrounding context window |
+| `get_time_stats` | Hourly / weekday / daily distribution, timezone-aware |
+| `get_member_activity` | Top-N members by message count with percentage of total |
+| `get_member_name_history` | Historical account name / nickname entries for a member |
+| `get_response_time_analysis` | Reply intervals between sender pairs (LAG window function) |
+| `keyword_frequency` | Stub — returns guidance (NLP segmentation not bundled in MCP) |
+
 ### Notes
 
 - `get_messages` returns at most 100 messages per call. Use the `page` parameter to paginate. Responses include `has_more` and a `hint` when more results exist.
-- `execute_sql` is for statistical aggregation only (word frequency, activity breakdown, member interactions). Use `get_messages` to read message content.
+- `execute_sql` is for statistical aggregation only. Use `get_messages` or `get_message_context` to read message content.
+- Analytics tools issue their own SQL through the same `/sql` endpoint (no 200-row LIMIT injection).
 - All avatar/binary fields are stripped from responses to minimize context usage.
 
 ## CLI Options
