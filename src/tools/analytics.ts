@@ -524,6 +524,50 @@ export async function getMemberActivity(
   return formatToolResultAsText({ topN, returned: rows.length, members: lines })
 }
 
+const getMemberNameHistorySchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  member_id: z.number().describe('Member numeric ID (from get_members)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
+})
+
+export type GetMemberNameHistoryParams = z.infer<typeof getMemberNameHistorySchema>
+
+export async function getMemberNameHistory(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetMemberNameHistoryParams
+): Promise<string> {
+  const { session_id, member_id, format = 'text', timezone = 'Asia/Shanghai' } = params
+
+  const sql = `
+    SELECT name_type, name, start_ts, end_ts
+    FROM member_name_history
+    WHERE member_id = ${Math.floor(member_id)}
+    ORDER BY start_ts
+  `.trim()
+
+  const rows = await sqlInternal(client, session_id, sql)
+
+  if (rows.length === 0) {
+    const msg = `No name history found for member id=${member_id}.`
+    return format === 'json' ? JSON.stringify({ total: 0, history: [] }, null, 2) : msg
+  }
+
+  if (format === 'json') {
+    return JSON.stringify({ total: rows.length, history: rows }, null, 2)
+  }
+
+  const fmt = (ts: number | null) =>
+    ts === null ? '(current)' : new Date(ts * 1000).toLocaleString('zh-CN', {
+      timeZone: timezone,
+      year: 'numeric', month: 'numeric', day: 'numeric',
+    })
+
+  const lines = rows.map((r) => `[${r.name_type}] ${r.name}: ${fmt(r.start_ts)} ~ ${fmt(r.end_ts)}`)
+
+  return formatToolResultAsText({ member_id, total: rows.length, history: lines })
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -602,6 +646,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await getMemberActivity(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'get_member_name_history',
+    'Get the historical name changes (account name, nickname) for a single member. Useful for tracking identity changes over time.',
+    getMemberNameHistorySchema.shape,
+    async (args) => {
+      try {
+        const text = await getMemberNameHistory(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)

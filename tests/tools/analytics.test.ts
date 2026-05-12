@@ -11,6 +11,7 @@ import { getSessionSummaries } from '../../src/tools/analytics.js'
 import { deepSearchMessages } from '../../src/tools/analytics.js'
 import { getTimeStats } from '../../src/tools/analytics.js'
 import { getMemberActivity } from '../../src/tools/analytics.js'
+import { getMemberNameHistory } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -463,5 +464,41 @@ describe('get_member_activity', () => {
     expect(out).toMatch(/Alice/)
     expect(out).toMatch(/Bob/)
     expect(out).toMatch(/50/)
+  })
+})
+
+describe('get_member_name_history', () => {
+  it('queries member_name_history filtered by member_id', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getMemberNameHistory(mockClient as any, {
+      session_id: 's1', member_id: 7, format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/FROM member_name_history/)
+    expect(sql).toMatch(/member_id = 7/)
+    expect(sql).toMatch(/ORDER BY start_ts/)
+  })
+
+  it('formats text output with name_type and time range', async () => {
+    mockClient.post.mockResolvedValue({
+      data: { rows: [
+        { name_type: 'account', name: 'Alice', start_ts: 1700000000, end_ts: null },
+        { name_type: 'nickname', name: 'A', start_ts: 1700000500, end_ts: 1700100000 },
+      ] },
+    })
+    const out = await getMemberNameHistory(mockClient as any, {
+      session_id: 's1', member_id: 7, format: 'text',
+    })
+    expect(out).toMatch(/Alice/)
+    expect(out).toMatch(/account/)
+    expect(out).toMatch(/nickname/)
+  })
+
+  it('returns informative text when no history rows', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    const out = await getMemberNameHistory(mockClient as any, {
+      session_id: 's1', member_id: 99, format: 'text',
+    })
+    expect(out).toMatch(/no.*history|not found/i)
   })
 })
