@@ -6,6 +6,7 @@ import { registerMembersTools } from './tools/members.js'
 import { registerStatsTools } from './tools/stats.js'
 import { registerSQLTools } from './tools/sql.js'
 import { registerConversationTools } from './tools/conversation.js'
+import { registerAnalyticsTools } from './tools/analytics.js'
 
 export function createServer(client: ChatLabClient): McpServer {
   const server = new McpServer({
@@ -19,6 +20,7 @@ export function createServer(client: ChatLabClient): McpServer {
   registerStatsTools(server, client)
   registerSQLTools(server, client)
   registerConversationTools(server, client)
+  registerAnalyticsTools(server, client)
 
   return server
 }
