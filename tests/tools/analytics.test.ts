@@ -7,6 +7,7 @@ import {
   getMessageContext,
 } from '../../src/tools/analytics.js'
 import { getConversationBetween } from '../../src/tools/analytics.js'
+import { getSessionSummaries } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -190,5 +191,61 @@ describe('get_conversation_between', () => {
     })
     expect(out).toMatch(/Alice/)
     expect(out).toMatch(/Bob/)
+  })
+})
+
+describe('get_session_summaries', () => {
+  it('queries chat_session table with summary filter', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getSessionSummaries(mockClient as any, { session_id: 's1', format: 'json' })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/FROM chat_session/)
+    expect(sql).toMatch(/summary IS NOT NULL/)
+    expect(sql).toMatch(/ORDER BY start_ts DESC/)
+  })
+
+  it('applies start/end time filter on start_ts column', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getSessionSummaries(mockClient as any, {
+      session_id: 's1',
+      start_time: 1700000000,
+      end_time: 1700100000,
+      format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/start_ts >= 1700000000/)
+    expect(sql).toMatch(/start_ts <= 1700100000/)
+  })
+
+  it('filters by keyword client-side after fetching rows', async () => {
+    mockClient.post.mockResolvedValue({
+      data: {
+        rows: [
+          { id: 1, start_ts: 100, end_ts: 200, message_count: 50, summary: 'discussed travel plans' },
+          { id: 2, start_ts: 300, end_ts: 400, message_count: 30, summary: 'lunch decision' },
+          { id: 3, start_ts: 500, end_ts: 600, message_count: 20, summary: 'travel costs' },
+        ],
+      },
+    })
+    const out = await getSessionSummaries(mockClient as any, {
+      session_id: 's1',
+      keywords: ['travel'],
+      format: 'json',
+    })
+    const data = JSON.parse(out)
+    expect(data.returned).toBe(2)
+    expect(data.sessions.every((s: any) => /travel/i.test(s.summary))).toBe(true)
+  })
+
+  it('returns informative text when no summaries exist', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    const out = await getSessionSummaries(mockClient as any, { session_id: 's1', format: 'text' })
+    expect(out).toMatch(/no.*summar|generate|haven't/i)
+  })
+
+  it('returns informative text when table missing (older schema)', async () => {
+    mockClient.post.mockRejectedValue(new Error('SQL execution error: no such table: chat_session'))
+    const out = await getSessionSummaries(mockClient as any, { session_id: 's1', format: 'text' })
+    expect(out).toMatch(/newer.*schema|reimport/i)
   })
 })

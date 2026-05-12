@@ -66,6 +66,22 @@ export function sqlEscape(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+/**
+ * If the error indicates a missing table (older schema lacking
+ * chat_session / message_fts / etc.), return a friendly hint string.
+ * Otherwise return null so the caller can rethrow.
+ *
+ * Shared by tools that depend on newer schema features.
+ */
+function missingTableHint(sql: string, err: Error): string | null {
+  const msg = err.message || ''
+  if (/no such table/i.test(msg)) {
+    return 'This feature requires a newer database schema (chat_session / message_fts). Please reimport the session in the latest ChatLab version.'
+  }
+  void sql
+  return null
+}
+
 const getMessageContextSchema = z.object({
   session_id: z.string().describe('Session ID'),
   message_ids: z.array(z.number()).min(1).describe('Target message IDs (one or many)'),
@@ -190,6 +206,91 @@ export async function getConversationBetween(
   })
 }
 
+const getSessionSummariesSchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  keywords: z.array(z.string()).optional().describe('Filter summaries containing any of these keywords (case-insensitive)'),
+  limit: z.number().optional().describe('Max rows to return (default 20, max 100)'),
+  start_time: z.number().optional().describe('Earliest start_ts (Unix seconds)'),
+  end_time: z.number().optional().describe('Latest start_ts (Unix seconds)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
+})
+
+export type GetSessionSummariesParams = z.infer<typeof getSessionSummariesSchema>
+
+export async function getSessionSummaries(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetSessionSummariesParams
+): Promise<string> {
+  const { session_id, keywords, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100)
+  const fetchLimit = keywords && keywords.length > 0 ? Math.max(limit * 5, 100) : limit
+
+  const sql = `
+    SELECT id, start_ts, end_ts, message_count, summary
+    FROM chat_session
+    WHERE summary IS NOT NULL
+      ${buildTimeFilter(start_time, end_time, 'start_ts')}
+    ORDER BY start_ts DESC
+    LIMIT ${fetchLimit}
+  `.trim()
+
+  let rows: any[]
+  try {
+    rows = await sqlInternal(client, session_id, sql)
+  } catch (e) {
+    const hint = missingTableHint(sql, e as Error)
+    if (hint) {
+      return format === 'json' ? JSON.stringify({ message: hint }, null, 2) : hint
+    }
+    throw e
+  }
+
+  let filtered = rows
+  if (keywords && keywords.length > 0) {
+    const lowered = keywords.map((k) => k.toLowerCase())
+    filtered = rows.filter((r) =>
+      typeof r.summary === 'string' && lowered.some((k) => r.summary.toLowerCase().includes(k))
+    )
+  }
+  filtered = filtered.slice(0, limit)
+
+  if (filtered.length === 0) {
+    const msg = "No AI-generated summaries found. Generate them in ChatLab's session timeline first."
+    return format === 'json'
+      ? JSON.stringify({ total: 0, returned: 0, sessions: [], message: msg }, null, 2)
+      : msg
+  }
+
+  const sessions = filtered.map((r) => ({
+    sessionId: r.id,
+    startTs: r.start_ts,
+    endTs: r.end_ts,
+    messageCount: r.message_count,
+    summary: r.summary,
+  }))
+
+  if (format === 'json') {
+    return JSON.stringify({ total: filtered.length, returned: sessions.length, sessions }, null, 2)
+  }
+
+  const fmtTime = (ts: number) =>
+    new Date(ts * 1000).toLocaleString('zh-CN', {
+      timeZone: timezone,
+      year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+
+  const lines = sessions.map(
+    (s) => `[${s.sessionId}] ${fmtTime(s.startTs)} ~ ${fmtTime(s.endTs)} (${s.messageCount} msgs)\n  ${s.summary}`
+  )
+
+  return formatToolResultAsText({
+    total: filtered.length,
+    returned: sessions.length,
+    summaries: lines,
+  })
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_message_context',
@@ -212,6 +313,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     async (args) => {
       try {
         const text = await getConversationBetween(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
+
+  server.tool(
+    'get_session_summaries',
+    'Get AI-generated summaries of chat sub-sessions from the chat_session table. Use to quickly survey what topics have been discussed. Supports keyword filtering and time range. Returns text by default.',
+    getSessionSummariesSchema.shape,
+    async (args) => {
+      try {
+        const text = await getSessionSummaries(client, args)
         return { content: [{ type: 'text' as const, text }] }
       } catch (e) {
         return toolError(e, args.session_id)
