@@ -66,12 +66,79 @@ export function sqlEscape(value: string): string {
   return value.replace(/'/g, "''")
 }
 
+const getMessageContextSchema = z.object({
+  session_id: z.string().describe('Session ID'),
+  message_ids: z.array(z.number()).min(1).describe('Target message IDs (one or many)'),
+  context_size: z.number().optional().describe('Messages before AND after each target (default 20, max 100)'),
+  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
+  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
+})
+
+export type GetMessageContextParams = z.infer<typeof getMessageContextSchema>
+
+export async function getMessageContext(
+  client: Pick<ChatLabClient, 'post'>,
+  params: GetMessageContextParams
+): Promise<string> {
+  const { session_id, message_ids, format = 'text', timezone = 'Asia/Shanghai' } = params
+  const ctx = Math.min(Math.max(params.context_size ?? 20, 1), 100)
+
+  const ranges = message_ids.map((id) => `(m.id BETWEEN ${id - ctx} AND ${id + ctx})`).join(' OR ')
+
+  const sql = `
+    SELECT m.id, m.ts, m.type, m.content,
+           mem.platform_id AS senderPlatformId,
+           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    FROM message m
+    LEFT JOIN member mem ON m.sender_id = mem.id
+    WHERE ${ranges}
+    ORDER BY m.id
+    LIMIT 2000
+  `.trim()
+
+  const rows = await sqlInternal(client, session_id, sql)
+
+  if (rows.length === 0) {
+    return format === 'json'
+      ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2)
+      : 'No matching messages found for the given message IDs.'
+  }
+
+  if (format === 'json') {
+    return JSON.stringify({ total: rows.length, returned: rows.length, rawMessages: rows }, null, 2)
+  }
+
+  const lines = rows.map((r) => {
+    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
+      timeZone: timezone,
+      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    })
+    const content = r.content ?? '[no content]'
+    return `${time} ${r.senderName}: ${content}`
+  })
+
+  const details: Record<string, unknown> = {
+    total: rows.length,
+    returned: rows.length,
+    requestedMessageIds: message_ids,
+    contextSize: ctx,
+    messages: lines,
+  }
+  return formatToolResultAsText(details)
+}
+
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
-  // Tools added one at a time in subsequent tasks.
-  void server
-  void client
-  void toolError
-  void sqlInternal
-  void formatToolResultAsText
-  void z
+  server.tool(
+    'get_message_context',
+    'Get N messages before and after one or more specific message IDs. Use when the user references "what was being said around message X" or wants to see the conversation surrounding a specific message.',
+    getMessageContextSchema.shape,
+    async (args) => {
+      try {
+        const text = await getMessageContext(client, args)
+        return { content: [{ type: 'text' as const, text }] }
+      } catch (e) {
+        return toolError(e, args.session_id)
+      }
+    }
+  )
 }
