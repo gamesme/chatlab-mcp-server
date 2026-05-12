@@ -158,7 +158,7 @@ export async function getConversationBetween(
     JOIN member mem ON m.sender_id = mem.id
     WHERE m.sender_id IN (${Math.floor(member_id_1)}, ${Math.floor(member_id_2)})
       ${buildTimeFilter(start_time, end_time, 'm.ts')}
-    ORDER BY m.ts
+    ORDER BY m.ts, m.id
     LIMIT ${limit}
   `.trim()
 
