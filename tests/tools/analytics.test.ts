@@ -6,6 +6,7 @@ import {
   sqlEscape,
   getMessageContext,
 } from '../../src/tools/analytics.js'
+import { getConversationBetween } from '../../src/tools/analytics.js'
 
 const mockClient = { post: vi.fn(), get: vi.fn() }
 beforeEach(() => {
@@ -129,5 +130,65 @@ describe('get_message_context', () => {
       format: 'text',
     })
     expect(out).toMatch(/no.*messages|No matching/i)
+  })
+})
+
+describe('get_conversation_between', () => {
+  it('filters by sender_id IN (a, b)', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getConversationBetween(mockClient as any, {
+      session_id: 's1',
+      member_id_1: 5,
+      member_id_2: 9,
+      format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/m\.sender_id IN \(5, 9\)/)
+    expect(sql).toMatch(/ORDER BY m\.ts/)
+  })
+
+  it('applies time filters', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getConversationBetween(mockClient as any, {
+      session_id: 's1',
+      member_id_1: 5,
+      member_id_2: 9,
+      start_time: 1700000000,
+      end_time: 1700100000,
+      format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/m\.ts >= 1700000000/)
+    expect(sql).toMatch(/m\.ts <= 1700100000/)
+  })
+
+  it('defaults limit to 100, caps at 1000', async () => {
+    mockClient.post.mockResolvedValue({ data: { rows: [] } })
+    await getConversationBetween(mockClient as any, {
+      session_id: 's1', member_id_1: 1, member_id_2: 2, format: 'json',
+    })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 100/)
+
+    mockClient.post.mockClear()
+    await getConversationBetween(mockClient as any, {
+      session_id: 's1', member_id_1: 1, member_id_2: 2, limit: 99999, format: 'json',
+    })
+    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 1000/)
+  })
+
+  it('formats text output', async () => {
+    mockClient.post.mockResolvedValue({
+      data: {
+        rows: [
+          { id: 1, ts: 1700000000, senderName: 'Alice', content: 'hi' },
+          { id: 2, ts: 1700000060, senderName: 'Bob', content: 'hey' },
+        ],
+      },
+    })
+    const out = await getConversationBetween(mockClient as any, {
+      session_id: 's1', member_id_1: 1, member_id_2: 2, format: 'text',
+    })
+    expect(out).toMatch(/Alice/)
+    expect(out).toMatch(/Bob/)
   })
 })
