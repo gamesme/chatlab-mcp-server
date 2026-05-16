@@ -43,13 +43,13 @@ describe('getMessages', () => {
     })
   })
 
-  it('caps limit at MAX_LIMIT (100) even when a larger value is passed', async () => {
+  it('caps limit at MAX_LIMIT (500) even when a larger value is passed', async () => {
     mockClient.get.mockResolvedValue({ messages: [] })
 
     await getMessages(mockClient as any, { session_id: 'chat_5_abc', limit: 9999 })
 
     const params = mockClient.get.mock.calls[0][1]
-    expect(params.limit).toBe('100')
+    expect(params.limit).toBe('500')
   })
 
   it('omits undefined optional params from query', async () => {
@@ -79,5 +79,19 @@ describe('getMessages', () => {
     const result = JSON.parse(await getMessages(mockClient as any, { session_id: 'chat_5_abc', format: 'json' }))
     expect(result.data.has_more).toBe(true)
     expect(result.data.hint).toMatch(/page=2/)
+  })
+
+  it('falls back to defaults when page and limit are NaN', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0 } })
+
+    await getMessages(mockClient as any, {
+      session_id: 'chat_5_abc',
+      page: NaN,
+      limit: NaN,
+    })
+
+    const params = mockClient.get.mock.calls[0][1]
+    expect(params).not.toHaveProperty('page')
+    expect(params.limit).toBe('20')
   })
 })

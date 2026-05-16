@@ -1,7 +1,7 @@
 {
   "name": "@gamesme/chatlab-mcp-server",
-  "version": "0.19.0",
-  "description": "MCP server for ChatLab chat history",
+  "version": "0.19.100",
+  "description": "MCP server for ChatLab chat history (forked from upstream v0.19.0)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

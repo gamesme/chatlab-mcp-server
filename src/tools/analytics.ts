@@ -294,12 +294,12 @@ export async function getSessionSummaries(
 const deepSearchSchema = z.object({
   session_id: z.string().describe('Session ID'),
   keywords: z.array(z.string()).min(1).describe('Keywords to search (FTS5 MATCH, joined by OR)'),
-  sender_id: z.number().optional().describe('Restrict to a specific sender (numeric member.id)'),
+  sender_id: z.number().finite().optional().describe('Restrict to a specific sender (numeric member.id)'),
   start_time: z.number().optional().describe('Start time (Unix seconds)'),
   end_time: z.number().optional().describe('End time (Unix seconds)'),
-  limit: z.number().optional().describe('Max hits before context expansion (default 100, max 1000)'),
-  context_before: z.number().optional().describe('Context messages before each hit (default 2, max 20)'),
-  context_after: z.number().optional().describe('Context messages after each hit (default 2, max 20)'),
+  limit: z.number().finite().optional().describe('Max hits before context expansion (default 100, max 1000)'),
+  context_before: z.number().finite().optional().describe('Context messages before each hit (default 2, max 20)'),
+  context_after: z.number().finite().optional().describe('Context messages after each hit (default 2, max 20)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
 })
@@ -316,9 +316,15 @@ export async function deepSearchMessages(
   params: DeepSearchParams
 ): Promise<string> {
   const { session_id, keywords, sender_id, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000)
-  const before = Math.min(Math.max(params.context_before ?? 2, 0), 20)
-  const after = Math.min(Math.max(params.context_after ?? 2, 0), 20)
+  const limit = params.limit !== undefined && Number.isFinite(params.limit)
+    ? Math.min(Math.max(params.limit, 1), 1000)
+    : 100
+  const before = params.context_before !== undefined && Number.isFinite(params.context_before)
+    ? Math.min(Math.max(params.context_before, 0), 20)
+    : 2
+  const after = params.context_after !== undefined && Number.isFinite(params.context_after)
+    ? Math.min(Math.max(params.context_after, 0), 20)
+    : 2
 
   const matchExpr = keywords.map(ftsEscape).join(' OR ')
 

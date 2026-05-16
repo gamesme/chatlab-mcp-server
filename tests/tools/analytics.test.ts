@@ -341,6 +341,18 @@ describe('deep_search_messages', () => {
     const ctxSql = mockClient.post.mock.calls[1][1].sql as string
     expect(ctxSql).toMatch(/m\.id BETWEEN 50 AND 50/)
   })
+
+  it('falls back to defaults when limit/context params are NaN', async () => {
+    mockClient.post.mockResolvedValueOnce({ data: { rows: [] } })
+    await deepSearchMessages(mockClient as any, {
+      session_id: 's1', keywords: ['x'],
+      limit: NaN, context_before: NaN, context_after: NaN,
+      format: 'json',
+    })
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/LIMIT 100/)
+    expect(sql).not.toMatch(/LIMIT NaN/)
+  })
 })
 
 describe('get_time_stats', () => {

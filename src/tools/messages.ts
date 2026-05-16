@@ -7,7 +7,7 @@ import {
   formatToolResultAsText,
 } from '../format.js'
 
-const MAX_LIMIT = 100
+const MAX_LIMIT = 500
 
 const getMessagesSchema = z.object({
   session_id: z.string().describe('Session ID'),
@@ -16,8 +16,8 @@ const getMessagesSchema = z.object({
   end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),
   sender_id: z.string().optional().describe('Filter by member platformId'),
   type: z.number().optional().describe('Filter by message type number'),
-  page: z.number().optional().describe('Page number (default: 1)'),
-  limit: z.number().optional().describe(`Messages per page, max ${MAX_LIMIT} (default: 20). Use pagination to retrieve more.`),
+  page: z.number().finite().optional().describe('Page number (default: 1)'),
+  limit: z.number().finite().optional().describe(`Messages per page, max ${MAX_LIMIT} (default: 20). Use pagination to retrieve more.`),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default, compact to save tokens) or json'),
   merge_consecutive: z.boolean().optional().describe('Merge consecutive messages from same sender (text format only, default: true)'),
   filter_invalid: z.boolean().optional().describe('Filter meaningless messages like stickers, system messages (text format only, default: true)'),
@@ -37,8 +37,9 @@ export async function getMessages(
   if (filters.end_time !== undefined) query.endTime = String(filters.end_time)
   if (filters.sender_id !== undefined) query.sender_id = filters.sender_id
   if (filters.type !== undefined) query.type = String(filters.type)
-  if (filters.page !== undefined) query.page = String(filters.page)
-  query.limit = String(Math.min(filters.limit ?? 20, MAX_LIMIT))
+  if (filters.page !== undefined && Number.isFinite(filters.page)) query.page = String(filters.page)
+  const effectiveLimit = filters.limit !== undefined && Number.isFinite(filters.limit) ? filters.limit : 20
+  query.limit = String(Math.min(effectiveLimit, MAX_LIMIT))
 
   const result: any = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
 
