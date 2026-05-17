@@ -32,13 +32,14 @@ export async function getConversationText(
     filter_invalid = true,
   } = options
 
+  const effectiveMax = Number.isFinite(max_messages) ? max_messages : 100
   const query: Record<string, string> = {
-    limit: String(Math.min(max_messages, MAX_MESSAGES_PER_CALL)),
+    limit: String(Math.min(effectiveMax, MAX_MESSAGES_PER_CALL)),
     page: '1',
   }
 
-  if (start_time !== undefined) query.startTime = String(start_time)
-  if (end_time !== undefined) query.endTime = String(end_time)
+  if (start_time !== undefined && Number.isFinite(start_time)) query.startTime = String(start_time)
+  if (end_time !== undefined && Number.isFinite(end_time)) query.endTime = String(end_time)
   if (sender_id !== undefined) query.sender_id = sender_id
 
   const result: any = await client.get(`/api/v1/sessions/${sessionId}/messages`, query)
@@ -92,10 +93,10 @@ export function registerConversationTools(server: McpServer, client: ChatLabClie
     'Get conversation in plain text format with filtering and compression. Returns compact text optimized for LLM context (saves tokens vs JSON).',
     {
       session_id: z.string().describe('Session ID'),
-      start_time: z.number().optional().describe('Start time as Unix timestamp (seconds)'),
-      end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),
+      start_time: z.number().finite().optional().describe('Start time as Unix timestamp (seconds)'),
+      end_time: z.number().finite().optional().describe('End time as Unix timestamp (seconds)'),
       sender_id: z.string().optional().describe('Filter by member platformId'),
-      max_messages: z.number().optional().describe(`Maximum messages to retrieve, max ${MAX_MESSAGES_PER_CALL} (default: 100)`),
+      max_messages: z.number().finite().optional().describe(`Maximum messages to retrieve, max ${MAX_MESSAGES_PER_CALL} (default: 100)`),
       merge_consecutive: z.boolean().optional().describe('Merge consecutive messages from same sender (default: true)'),
       filter_invalid: z.boolean().optional().describe('Filter meaningless messages like stickers, system messages (default: true)'),
     },
@@ -115,7 +116,7 @@ export function registerConversationTools(server: McpServer, client: ChatLabClie
     'Get full conversation across multiple pages, returns compact text format. Use for small to medium sessions only.',
     {
       session_id: z.string().describe('Session ID'),
-      max_total_messages: z.number().optional().describe('Maximum total messages to retrieve (default: 500)'),
+      max_total_messages: z.number().finite().optional().describe('Maximum total messages to retrieve (default: 500)'),
       merge_consecutive: z.boolean().optional().describe('Merge consecutive messages from same sender (default: true)'),
       filter_invalid: z.boolean().optional().describe('Filter meaningless messages (default: true)'),
     },
@@ -124,7 +125,7 @@ export function registerConversationTools(server: McpServer, client: ChatLabClie
         const allMessages: Array<{ senderName: string; content: string | null; timestamp: number }> = []
         let page = 1
         const limit = Math.min(MAX_MESSAGES_PER_CALL, 100)
-        const maxTotal = Math.min(max_total_messages, 1000)
+        const maxTotal = Math.min(Number.isFinite(max_total_messages) ? max_total_messages : 500, 1000)
         let totalAvailable = 0
 
         while (allMessages.length < maxTotal) {

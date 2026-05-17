@@ -21,6 +21,14 @@ export async function sqlInternal(
 ): Promise<any[]> {
   const result: any = await client.post(`/api/v1/sessions/${sessionId}/sql`, { sql })
   const data = result?.data
+
+  // API returns { columns: [...], rows: [[...], [...]] } — convert 2D array to object array
+  if (Array.isArray(data?.columns) && Array.isArray(data?.rows)) {
+    return data.rows.map((row: any[]) =>
+      Object.fromEntries(data.columns.map((col: string, i: number) => [col, row[i]]))
+    )
+  }
+
   if (Array.isArray(data)) return data
   if (Array.isArray(data?.rows)) return data.rows
   return []

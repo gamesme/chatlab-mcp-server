@@ -12,10 +12,10 @@ const MAX_LIMIT = 500
 const getMessagesSchema = z.object({
   session_id: z.string().describe('Session ID'),
   keyword: z.string().optional().describe('Substring search'),
-  start_time: z.number().optional().describe('Start time as Unix timestamp (seconds)'),
-  end_time: z.number().optional().describe('End time as Unix timestamp (seconds)'),
+  start_time: z.number().finite().optional().describe('Start time as Unix timestamp (seconds)'),
+  end_time: z.number().finite().optional().describe('End time as Unix timestamp (seconds)'),
   sender_id: z.string().optional().describe('Filter by member platformId'),
-  type: z.number().optional().describe('Filter by message type number'),
+  type: z.number().finite().optional().describe('Filter by message type number'),
   page: z.number().finite().optional().describe('Page number (default: 1)'),
   limit: z.number().finite().optional().describe(`Messages per page, max ${MAX_LIMIT} (default: 20). Use pagination to retrieve more.`),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default, compact to save tokens) or json'),
@@ -33,10 +33,10 @@ export async function getMessages(
   const { session_id, format = 'text', merge_consecutive, filter_invalid, timezone = 'Asia/Shanghai', ...filters } = params
   const query: Record<string, string> = {}
   if (filters.keyword !== undefined) query.keyword = filters.keyword
-  if (filters.start_time !== undefined) query.startTime = String(filters.start_time)
-  if (filters.end_time !== undefined) query.endTime = String(filters.end_time)
+  if (filters.start_time !== undefined && Number.isFinite(filters.start_time)) query.startTime = String(filters.start_time)
+  if (filters.end_time !== undefined && Number.isFinite(filters.end_time)) query.endTime = String(filters.end_time)
   if (filters.sender_id !== undefined) query.sender_id = filters.sender_id
-  if (filters.type !== undefined) query.type = String(filters.type)
+  if (filters.type !== undefined && Number.isFinite(filters.type)) query.type = String(filters.type)
   if (filters.page !== undefined && Number.isFinite(filters.page)) query.page = String(filters.page)
   const effectiveLimit = filters.limit !== undefined && Number.isFinite(filters.limit) ? filters.limit : 20
   query.limit = String(Math.min(effectiveLimit, MAX_LIMIT))

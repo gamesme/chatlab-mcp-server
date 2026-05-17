@@ -21,4 +21,23 @@ describe('sqlInternal', () => {
     const rows = await sqlInternal(mockClient as any, 's1', 'SELECT 1')
     expect(rows).toEqual([{ n: 2 }])
   })
+
+  it('converts 2D array { columns, rows } to object array', async () => {
+    const mockClient = {
+      post: vi.fn().mockResolvedValue({
+        data: {
+          columns: ['id', 'ts'],
+          rows: [
+            [50, 1000],
+            [100, 2000],
+          ],
+        },
+      }),
+    }
+    const rows = await sqlInternal(mockClient as any, 's1', 'SELECT id, ts FROM message')
+    expect(rows).toEqual([
+      { id: 50, ts: 1000 },
+      { id: 100, ts: 2000 },
+    ])
+  })
 })

@@ -84,8 +84,8 @@ function missingTableHint(sql: string, err: Error): string | null {
 
 const getMessageContextSchema = z.object({
   session_id: z.string().describe('Session ID'),
-  message_ids: z.array(z.number()).min(1).describe('Target message IDs (one or many)'),
-  context_size: z.number().optional().describe('Messages before AND after each target (default 20, max 100)'),
+  message_ids: z.array(z.number().finite()).min(1).describe('Target message IDs (one or many)'),
+  context_size: z.number().finite().optional().describe('Messages before AND after each target (default 20, max 100)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
 })
@@ -97,7 +97,9 @@ export async function getMessageContext(
   params: GetMessageContextParams
 ): Promise<string> {
   const { session_id, message_ids, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const ctx = Math.min(Math.max(params.context_size ?? 20, 1), 100)
+  const ctx = params.context_size !== undefined && Number.isFinite(params.context_size)
+    ? Math.min(Math.max(params.context_size, 1), 100)
+    : 20
 
   const ranges = message_ids.map((id) => `(m.id BETWEEN ${id - ctx} AND ${id + ctx})`).join(' OR ')
 
@@ -145,11 +147,11 @@ export async function getMessageContext(
 
 const getConversationBetweenSchema = z.object({
   session_id: z.string().describe('Session ID'),
-  member_id_1: z.number().describe('First member numeric ID (from get_members)'),
-  member_id_2: z.number().describe('Second member numeric ID (from get_members)'),
-  start_time: z.number().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().optional().describe('End time (Unix seconds)'),
-  limit: z.number().optional().describe('Max messages (default 100, max 1000)'),
+  member_id_1: z.number().finite().describe('First member numeric ID (from get_members)'),
+  member_id_2: z.number().finite().describe('Second member numeric ID (from get_members)'),
+  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
+  limit: z.number().finite().optional().describe('Max messages (default 100, max 1000)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
 })
@@ -164,7 +166,9 @@ export async function getConversationBetween(
     session_id, member_id_1, member_id_2,
     start_time, end_time, format = 'text', timezone = 'Asia/Shanghai',
   } = params
-  const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000)
+  const limit = params.limit !== undefined && Number.isFinite(params.limit)
+    ? Math.min(Math.max(params.limit, 1), 1000)
+    : 100
 
   const sql = `
     SELECT m.id, m.ts, m.type, m.content,
@@ -209,9 +213,9 @@ export async function getConversationBetween(
 const getSessionSummariesSchema = z.object({
   session_id: z.string().describe('Session ID'),
   keywords: z.array(z.string()).optional().describe('Filter summaries containing any of these keywords (case-insensitive)'),
-  limit: z.number().optional().describe('Max rows to return (default 20, max 100)'),
-  start_time: z.number().optional().describe('Earliest start_ts (Unix seconds)'),
-  end_time: z.number().optional().describe('Latest start_ts (Unix seconds)'),
+  limit: z.number().finite().optional().describe('Max rows to return (default 20, max 100)'),
+  start_time: z.number().finite().optional().describe('Earliest start_ts (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('Latest start_ts (Unix seconds)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
 })
@@ -223,7 +227,9 @@ export async function getSessionSummaries(
   params: GetSessionSummariesParams
 ): Promise<string> {
   const { session_id, keywords, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100)
+  const limit = params.limit !== undefined && Number.isFinite(params.limit)
+    ? Math.min(Math.max(params.limit, 1), 100)
+    : 20
   const fetchLimit = keywords && keywords.length > 0 ? Math.max(limit * 5, 100) : limit
 
   const sql = `
@@ -295,8 +301,8 @@ const deepSearchSchema = z.object({
   session_id: z.string().describe('Session ID'),
   keywords: z.array(z.string()).min(1).describe('Keywords to search (FTS5 MATCH, joined by OR)'),
   sender_id: z.number().finite().optional().describe('Restrict to a specific sender (numeric member.id)'),
-  start_time: z.number().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
   limit: z.number().finite().optional().describe('Max hits before context expansion (default 100, max 1000)'),
   context_before: z.number().finite().optional().describe('Context messages before each hit (default 2, max 20)'),
   context_after: z.number().finite().optional().describe('Context messages after each hit (default 2, max 20)'),
@@ -405,8 +411,8 @@ const WEEKDAY_NAMES_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'
 const getTimeStatsSchema = z.object({
   session_id: z.string().describe('Session ID'),
   type: z.enum(['hourly', 'weekday', 'daily']).describe('Bucket granularity'),
-  start_time: z.number().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for bucketing (default Asia/Shanghai)'),
 })
@@ -477,9 +483,9 @@ export async function getTimeStats(
 
 const getMemberActivitySchema = z.object({
   session_id: z.string().describe('Session ID'),
-  top_n: z.number().optional().describe('Top N members (default 10, max 50)'),
-  start_time: z.number().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  top_n: z.number().finite().optional().describe('Top N members (default 10, max 50)'),
+  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
 })
 
@@ -490,7 +496,9 @@ export async function getMemberActivity(
   params: GetMemberActivityParams
 ): Promise<string> {
   const { session_id, start_time, end_time, format = 'text' } = params
-  const topN = Math.min(Math.max(params.top_n ?? 10, 1), 50)
+  const topN = params.top_n !== undefined && Number.isFinite(params.top_n)
+    ? Math.min(Math.max(params.top_n, 1), 50)
+    : 10
 
   const sql = `
     WITH counts AS (
@@ -532,7 +540,7 @@ export async function getMemberActivity(
 
 const getMemberNameHistorySchema = z.object({
   session_id: z.string().describe('Session ID'),
-  member_id: z.number().describe('Member numeric ID (from get_members)'),
+  member_id: z.number().finite().describe('Member numeric ID (from get_members)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
   timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
 })
@@ -576,9 +584,9 @@ export async function getMemberNameHistory(
 
 const getResponseTimeSchema = z.object({
   session_id: z.string().describe('Session ID'),
-  top_n: z.number().optional().describe('Top N (from, to) pairs (default 10, max 50)'),
-  start_time: z.number().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().optional().describe('End time (Unix seconds)'),
+  top_n: z.number().finite().optional().describe('Top N (from, to) pairs (default 10, max 50)'),
+  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
   format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
 })
 
@@ -589,7 +597,9 @@ export async function getResponseTimeAnalysis(
   params: GetResponseTimeParams
 ): Promise<string> {
   const { session_id, start_time, end_time, format = 'text' } = params
-  const topN = Math.min(Math.max(params.top_n ?? 10, 1), 50)
+  const topN = params.top_n !== undefined && Number.isFinite(params.top_n)
+    ? Math.min(Math.max(params.top_n, 1), 50)
+    : 10
 
   const sql = `
     WITH ordered AS (
