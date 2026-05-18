@@ -6,6 +6,14 @@ import {
   MESSAGES_PER_PAGE_MAX,
   FULL_CONVERSATION_TOTAL_MAX,
 } from '../src/format.js'
+import type { FormattedMessage } from '../src/format.js'
+
+// Compile-time guard: RawMessage must remain structurally assignable to
+// FormattedMessage. The entire refactor pipeline relies on RawMessage[] being
+// passable to formatMessagesAsPlainText without projection. If a later change
+// breaks this assignability, this file fails to compile.
+const _structural_check: FormattedMessage = {} as RawMessage
+void _structural_check
 
 describe('RawMessage type & constants', () => {
   it('exports MESSAGES_PER_PAGE_MAX = 500', () => {
