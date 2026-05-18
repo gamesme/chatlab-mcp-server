@@ -1,114 +1,150 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
-import { ChatLabClient } from '../client.js'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { ChatLabClient } from '../client.js'
+import { MESSAGES_PER_PAGE_MAX, type RawMessage } from '../format.js'
 import { toolError } from './utils.js'
-import {
-  formatMessagesAsPlainText,
-  formatToolResultAsText,
-} from '../format.js'
+import { formatMessagesAsPlainText, formatToolResultAsText } from '../format.js'
 
-const MAX_LIMIT = 500
+export interface FetchMessagesParams {
+  session_id: string
+  keyword?: string
+  start_time?: number
+  end_time?: number
+  sender_id?: string
+  type?: number
+  page?: number
+  limit?: number
+  filter_invalid?: boolean
+  // remaining shared params (format/timezone/merge_consecutive) are unused here
+}
+
+export interface FetchMessagesResult {
+  messages: RawMessage[]
+  total?: number
+  page: number
+  has_more?: boolean
+}
+
+/**
+ * 拉取消息(REST 通道)。
+ * SQL fast path 由 Task 5 增加;本任务先只走 REST。
+ */
+export async function fetchMessagesViaRest(
+  client: Pick<ChatLabClient, 'get'>,
+  params: FetchMessagesParams,
+): Promise<FetchMessagesResult> {
+  const query: Record<string, string> = {}
+  if (params.keyword !== undefined) query.keyword = params.keyword
+  if (params.start_time !== undefined && Number.isFinite(params.start_time)) {
+    query.startTime = String(params.start_time)
+  }
+  if (params.end_time !== undefined && Number.isFinite(params.end_time)) {
+    query.endTime = String(params.end_time)
+  }
+  if (params.sender_id !== undefined) query.sender_id = params.sender_id
+  if (params.type !== undefined && Number.isFinite(params.type)) {
+    query.type = String(params.type)
+  }
+  if (params.page !== undefined && Number.isFinite(params.page)) {
+    query.page = String(params.page)
+  }
+  const effectiveLimit =
+    params.limit !== undefined && Number.isFinite(params.limit) ? params.limit : 100
+  query.limit = String(Math.min(effectiveLimit, MESSAGES_PER_PAGE_MAX))
+
+  const result: any = await client.get(
+    `/api/v1/sessions/${params.session_id}/messages`,
+    query,
+  )
+
+  const rawMessages: RawMessage[] = (result.data?.messages ?? []).map((m: any) => ({
+    id: m.id,
+    senderName: m.senderName,
+    senderPlatformId: m.senderPlatformId,
+    content: m.content,
+    timestamp: m.timestamp,
+    type: m.type,
+  }))
+
+  return {
+    messages: rawMessages,
+    total: result.data?.total,
+    page: result.data?.page ?? Number(query.page ?? 1),
+  }
+}
+
+// ─── Temporary backwards-compatible getMessages() ──────────────────────────
+// Task 6 deletes this and migrates to registerMessageTool. Kept here for one
+// task so existing server.tool registration continues to compile.
+
+const MESSAGE_TYPE_DESC =
+  '0=text 1=image 2=voice 3=video 4=emoji 5=file 7=location 8=system ' +
+  '21=voip 23=quote 24=pat 25=link 27=music 80=miniapp 99=other'
 
 const getMessagesSchema = z.object({
   session_id: z.string().describe('Session ID'),
-  keyword: z.string().optional().describe('Substring search'),
-  start_time: z.number().finite().optional().describe('Start time as Unix timestamp (seconds)'),
-  end_time: z.number().finite().optional().describe('End time as Unix timestamp (seconds)'),
+  keyword: z.string().optional()
+    .describe('Full-text search via FTS5 when available, falls back to LIKE'),
+  start_time: z.number().finite().optional().describe('Start time as Unix seconds'),
+  end_time: z.number().finite().optional().describe('End time as Unix seconds'),
   sender_id: z.string().optional().describe('Filter by member platformId'),
-  type: z.number().finite().optional().describe('Filter by message type number'),
-  page: z.number().finite().optional().describe('Page number (default: 1)'),
-  limit: z.number().finite().optional().describe(`Messages per page, max ${MAX_LIMIT} (default: 20). Use pagination to retrieve more.`),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default, compact to save tokens) or json'),
-  merge_consecutive: z.boolean().optional().describe('Merge consecutive messages from same sender (text format only, default: true)'),
-  filter_invalid: z.boolean().optional().describe('Filter meaningless messages like stickers, system messages (text format only, default: true)'),
-  timezone: z.string().optional().describe('Timezone for time display, e.g., "Asia/Shanghai", "America/New_York", "UTC" (default: Asia/Shanghai)'),
+  type: z.number().finite().optional()
+    .describe(`Filter by message type code. ${MESSAGE_TYPE_DESC}`),
+  page: z.number().finite().optional()
+    .describe('Page number (default 1). page=1 returns the LATEST messages; within each page messages are sorted chronologically (ascending)'),
+  limit: z.number().finite().optional()
+    .describe(`Messages per page (default 100, max ${MESSAGES_PER_PAGE_MAX})`),
+  format: z.enum(['json', 'text']).optional().describe('Output format'),
+  merge_consecutive: z.boolean().optional().describe('Merge consecutive (text only)'),
+  filter_invalid: z.boolean().optional().describe('Filter invalid (text only)'),
+  timezone: z.string().optional().describe('Timezone for time display'),
 })
 
 type GetMessagesParams = z.infer<typeof getMessagesSchema>
 
 export async function getMessages(
   client: Pick<ChatLabClient, 'get'>,
-  params: GetMessagesParams
+  params: GetMessagesParams,
 ): Promise<string> {
-  const { session_id, format = 'text', merge_consecutive, filter_invalid, timezone = 'Asia/Shanghai', ...filters } = params
-  const query: Record<string, string> = {}
-  if (filters.keyword !== undefined) query.keyword = filters.keyword
-  if (filters.start_time !== undefined && Number.isFinite(filters.start_time)) query.startTime = String(filters.start_time)
-  if (filters.end_time !== undefined && Number.isFinite(filters.end_time)) query.endTime = String(filters.end_time)
-  if (filters.sender_id !== undefined) query.sender_id = filters.sender_id
-  if (filters.type !== undefined && Number.isFinite(filters.type)) query.type = String(filters.type)
-  if (filters.page !== undefined && Number.isFinite(filters.page)) query.page = String(filters.page)
-  const effectiveLimit = filters.limit !== undefined && Number.isFinite(filters.limit) ? filters.limit : 20
-  query.limit = String(Math.min(effectiveLimit, MAX_LIMIT))
+  const { format = 'text', timezone = 'Asia/Shanghai', merge_consecutive, filter_invalid, ...rest } = params
+  const result = await fetchMessagesViaRest(client, rest as FetchMessagesParams)
 
-  const result: any = await client.get(`/api/v1/sessions/${session_id}/messages`, query)
+  const sorted = [...result.messages].sort((a, b) => a.timestamp - b.timestamp)
 
-  if (result.data?.messages) {
-    const { total, page: p = 1, messages } = result.data
-
-    // 处理消息数据并按时间升序排序（API 返回降序）
-    const processedMessages = messages
-      .map(({ senderAvatar, senderAliases, senderId, senderPlatformId, id, replyToMessageId, ...msg }: any) => msg)
-      .sort((a: any, b: any) => a.timestamp - b.timestamp)
-
-    // text 格式：返回纯文本对话
-    if (format === 'text') {
-      const formattedMessages = processedMessages.map((m: any) => ({
-        senderName: m.senderName,
-        content: m.content,
-        timestamp: m.timestamp,
-      }))
-
-      const plainText = formatMessagesAsPlainText(formattedMessages, {
-        mergeConsecutive: merge_consecutive ?? true,
-        filterInvalid: filter_invalid ?? true,
-        timezone,
-      })
-
-      // 构造和主项目类似的 details 结构
-      const timeRange = filters.start_time && filters.end_time
-        ? { start: new Date(filters.start_time * 1000).toLocaleString('zh-CN'), end: new Date(filters.end_time * 1000).toLocaleString('zh-CN') }
-        : undefined
-
-      const details: Record<string, unknown> = {
-        total,
-        returned: processedMessages.length,
-        page: p,
-      }
-
-      if (timeRange) {
-        details.timeRange = timeRange
-      }
-
-      if (plainText) {
-        details.messages = plainText.split('\n')
-      }
-
-      // 如果有更多页，添加 AI 友好的提示
-      if (total !== undefined && processedMessages.length < total) {
-        const nextPage = Number(p) + 1
-        const remaining = total - processedMessages.length
-        details.instruction = `还有 ${remaining} 条消息未显示。调用 get_messages(session_id="${session_id}", page=${nextPage}) 获取下一页`
-      }
-
-      return formatToolResultAsText(details)
+  if (format === 'text') {
+    const plainText = formatMessagesAsPlainText(sorted, {
+      mergeConsecutive: merge_consecutive ?? true,
+      filterInvalid: filter_invalid ?? true,
+      timezone,
+    })
+    const details: Record<string, unknown> = {
+      total: result.total,
+      returned: sorted.length,
+      page: result.page,
     }
-
-    // json 格式：返回原始 JSON
-    result.data.messages = processedMessages
-    if (total !== undefined && messages.length < total) {
-      result.data.has_more = true
-      result.data.hint = `Showing ${messages.length} of ${total} messages. Use page=${Number(p) + 1} to get the next batch.`
+    if (plainText) details.messages = plainText.split('\n')
+    if (result.total !== undefined && sorted.length < result.total) {
+      const nextPage = (result.page ?? 1) + 1
+      const remaining = result.total - sorted.length
+      details.instruction =
+        `还有 ${remaining} 条未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
     }
+    return formatToolResultAsText(details)
   }
 
-  return JSON.stringify(result, null, 2)
+  return JSON.stringify({
+    data: {
+      messages: sorted,
+      total: result.total,
+      page: result.page,
+    },
+  }, null, 2)
 }
 
 export function registerMessagesTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'get_messages',
-    `The primary tool for reading message content. Retrieves up to ${MAX_LIMIT} messages per call with filters for keyword, time range, and sender. Use page to paginate. Returns plain text by default (set format=json for JSON, format=text for compact format). Always prefer this over execute_sql when reading messages.`,
+    `The primary tool for reading message content. Retrieves up to ${MESSAGES_PER_PAGE_MAX} messages per call with filters for keyword (FTS5 when available), time range, sender, and type. Returns plain text by default; pass format=json for raw structured output. Prefer this over execute_sql when reading messages.`,
     getMessagesSchema.shape,
     async (args) => {
       try {
@@ -117,6 +153,6 @@ export function registerMessagesTools(server: McpServer, client: ChatLabClient):
       } catch (e) {
         return toolError(e, args.session_id)
       }
-    }
+    },
   )
 }

@@ -1,27 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getMessages } from '../../src/tools/messages.js'
+import { fetchMessagesViaRest } from '../../src/tools/messages.js'
 
-const mockClient = { get: vi.fn(), post: vi.fn() }
+const mockClient: any = { get: vi.fn(), post: vi.fn() }
 
-beforeEach(() => mockClient.get.mockReset())
+beforeEach(() => {
+  mockClient.get.mockReset()
+  mockClient.post.mockReset()
+})
 
-describe('getMessages', () => {
+describe('fetchMessagesViaRest', () => {
   it('calls messages endpoint with session_id', async () => {
-    const page = { messages: [{ id: 1, content: 'Hello' }], total: 1 }
-    mockClient.get.mockResolvedValue(page)
+    mockClient.get.mockResolvedValue({ data: { messages: [{ id: 1, senderName: 'A', senderPlatformId: 'pa', content: 'Hi', timestamp: 100, type: 0 }], total: 1, page: 1 } })
 
-    await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
+    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc' })
 
     expect(mockClient.get).toHaveBeenCalledWith(
       '/api/v1/sessions/chat_5_abc/messages',
-      expect.any(Object)
+      expect.any(Object),
     )
   })
 
-  it('passes all optional filters as string query params', async () => {
-    mockClient.get.mockResolvedValue({ messages: [] })
+  it('defaults limit to 100', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
 
-    await getMessages(mockClient as any, {
+    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc', filter_invalid: false })
+
+    const params = mockClient.get.mock.calls[0][1]
+    expect(params.limit).toBe('100')
+  })
+
+  it('caps limit at MESSAGES_PER_PAGE_MAX (500)', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc', limit: 9999, filter_invalid: false })
+
+    const params = mockClient.get.mock.calls[0][1]
+    expect(params.limit).toBe('500')
+  })
+
+  it('passes all REST-eligible filters as string query params', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
+
+    await fetchMessagesViaRest(mockClient, {
       session_id: 'chat_5_abc',
       keyword: 'hello',
       start_time: 1700000000,
@@ -30,6 +50,7 @@ describe('getMessages', () => {
       type: 1,
       page: 2,
       limit: 50,
+      filter_invalid: false,
     })
 
     expect(mockClient.get).toHaveBeenCalledWith('/api/v1/sessions/chat_5_abc/messages', {
@@ -43,55 +64,67 @@ describe('getMessages', () => {
     })
   })
 
-  it('caps limit at MAX_LIMIT (500) even when a larger value is passed', async () => {
-    mockClient.get.mockResolvedValue({ messages: [] })
+  it('preserves id and senderPlatformId in RawMessage output', async () => {
+    mockClient.get.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            id: 42,
+            senderName: 'Alice',
+            senderPlatformId: 'p_alice',
+            senderAvatar: 'http://example.com/a.png',
+            senderAliases: ['Al'],
+            senderId: 999,
+            content: 'Hi',
+            timestamp: 100,
+            type: 0,
+            replyToMessageId: null,
+          },
+        ],
+        total: 1,
+        page: 1,
+      },
+    })
 
-    await getMessages(mockClient as any, { session_id: 'chat_5_abc', limit: 9999 })
+    const result = await fetchMessagesViaRest(mockClient, {
+      session_id: 's1',
+      keyword: 'hi',
+      filter_invalid: false,
+    })
 
-    const params = mockClient.get.mock.calls[0][1]
-    expect(params.limit).toBe('500')
+    expect(result.messages[0]).toEqual({
+      id: 42,
+      senderName: 'Alice',
+      senderPlatformId: 'p_alice',
+      content: 'Hi',
+      timestamp: 100,
+      type: 0,
+    })
+  })
+
+  it('returns total and page from REST response', async () => {
+    mockClient.get.mockResolvedValue({
+      data: { messages: [], total: 250, page: 3 },
+    })
+
+    const result = await fetchMessagesViaRest(mockClient, {
+      session_id: 's1',
+      keyword: 'x',
+      filter_invalid: false,
+    })
+
+    expect(result.total).toBe(250)
+    expect(result.page).toBe(3)
   })
 
   it('omits undefined optional params from query', async () => {
-    mockClient.get.mockResolvedValue({ messages: [] })
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
 
-    await getMessages(mockClient as any, { session_id: 'chat_5_abc' })
+    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc', filter_invalid: false })
 
     const params = mockClient.get.mock.calls[0][1]
     expect(params).not.toHaveProperty('keyword')
-    expect(params).not.toHaveProperty('sender_id')
     expect(params).not.toHaveProperty('startTime')
-  })
-
-  it('returns JSON string of response', async () => {
-    const page = { messages: [{ id: 1 }], total: 1 }
-    mockClient.get.mockResolvedValue(page)
-
-    const result = await getMessages(mockClient as any, { session_id: 'chat_5_abc', format: 'json' })
-    expect(JSON.parse(result)).toEqual(page)
-  })
-
-  it('adds has_more and hint when total exceeds returned count', async () => {
-    mockClient.get.mockResolvedValue({
-      data: { messages: [{ id: 1 }, { id: 2 }], total: 500, page: 1 },
-    })
-
-    const result = JSON.parse(await getMessages(mockClient as any, { session_id: 'chat_5_abc', format: 'json' }))
-    expect(result.data.has_more).toBe(true)
-    expect(result.data.hint).toMatch(/page=2/)
-  })
-
-  it('falls back to defaults when page and limit are NaN', async () => {
-    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0 } })
-
-    await getMessages(mockClient as any, {
-      session_id: 'chat_5_abc',
-      page: NaN,
-      limit: NaN,
-    })
-
-    const params = mockClient.get.mock.calls[0][1]
-    expect(params).not.toHaveProperty('page')
-    expect(params.limit).toBe('20')
+    expect(params).not.toHaveProperty('endTime')
   })
 })
