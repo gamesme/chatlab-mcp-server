@@ -1,13 +1,9 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ChatLabClient } from '../client.js'
-import {
-  MESSAGES_PER_PAGE_MAX,
-  type RawMessage,
-  formatMessagesAsPlainText,
-  formatToolResultAsText,
-} from '../format.js'
-import { toolError, sqlInternal } from './utils.js'
+import { MESSAGES_PER_PAGE_MAX, type RawMessage } from '../format.js'
+import { sqlInternal } from './utils.js'
+import { registerMessageTool } from './message-tool.js'
 
 export interface FetchMessagesParams {
   session_id: string
@@ -161,15 +157,11 @@ export async function fetchMessagesViaRest(
   }
 }
 
-// ─── Temporary backwards-compatible getMessages() ──────────────────────────
-// Task 6 deletes this and migrates to registerMessageTool. Kept here for one
-// task so existing server.tool registration continues to compile.
-
 const MESSAGE_TYPE_DESC =
   '0=text 1=image 2=voice 3=video 4=emoji 5=file 7=location 8=system ' +
   '21=voip 23=quote 24=pat 25=link 27=music 80=miniapp 99=other'
 
-const getMessagesSchema = z.object({
+const getMessagesSchema = {
   session_id: z.string().describe('Session ID'),
   keyword: z.string().optional()
     .describe('Full-text search via FTS5 when available, falls back to LIKE'),
@@ -182,69 +174,13 @@ const getMessagesSchema = z.object({
     .describe('Page number (default 1). page=1 returns the LATEST messages; within each page messages are sorted chronologically (ascending)'),
   limit: z.number().finite().optional()
     .describe(`Messages per page (default 100, max ${MESSAGES_PER_PAGE_MAX})`),
-  format: z.enum(['json', 'text']).optional().describe('Output format'),
-  merge_consecutive: z.boolean().optional().describe('Merge consecutive (text only)'),
-  filter_invalid: z.boolean().optional().describe('Filter invalid (text only)'),
-  timezone: z.string().optional().describe('Timezone for time display'),
-})
-
-type GetMessagesParams = z.infer<typeof getMessagesSchema>
-
-export async function getMessages(
-  client: Pick<ChatLabClient, 'get' | 'post'>,
-  params: GetMessagesParams,
-): Promise<string> {
-  const { format = 'text', timezone = 'Asia/Shanghai', merge_consecutive, filter_invalid, ...rest } = params
-  const result = await fetchMessagesViaRest(client, { ...rest, filter_invalid } as FetchMessagesParams)
-
-  const sorted = [...result.messages].sort((a, b) => a.timestamp - b.timestamp)
-
-  if (format === 'text') {
-    const plainText = formatMessagesAsPlainText(sorted, {
-      mergeConsecutive: merge_consecutive ?? true,
-      filterInvalid: filter_invalid ?? true,
-      timezone,
-    })
-    const details: Record<string, unknown> = {
-      total: result.total,
-      returned: sorted.length,
-      page: result.page,
-    }
-    if (plainText) details.messages = plainText.split('\n')
-    if (result.total !== undefined && sorted.length < result.total) {
-      const nextPage = result.page + 1
-      const remaining = result.total - sorted.length
-      details.instruction =
-        `还有 ${remaining} 条未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
-    } else if (result.has_more) {
-      const nextPage = result.page + 1
-      details.instruction =
-        `还有更多消息未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
-    }
-    return formatToolResultAsText(details)
-  }
-
-  return JSON.stringify({
-    data: {
-      messages: sorted,
-      total: result.total,
-      page: result.page,
-    },
-  }, null, 2)
-}
+} as const
 
 export function registerMessagesTools(server: McpServer, client: ChatLabClient): void {
-  server.tool(
-    'get_messages',
-    `The primary tool for reading message content. Retrieves up to ${MESSAGES_PER_PAGE_MAX} messages per call with filters for keyword (FTS5 when available), time range, sender, and type. Returns plain text by default; pass format=json for raw structured output. Prefer this over execute_sql when reading messages.`,
-    getMessagesSchema.shape,
-    async (args) => {
-      try {
-        const text = await getMessages(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    },
-  )
+  registerMessageTool(server, client, {
+    name: 'get_messages',
+    description: `The primary tool for reading message content. Retrieves up to ${MESSAGES_PER_PAGE_MAX} messages per call with filters for keyword (FTS5 when available), time range, sender, and type. Use page to paginate. Returns plain text by default; pass format=json for raw structured output. Prefer this over execute_sql when reading messages.`,
+    schema: getMessagesSchema,
+    fetch: (args) => fetchMessagesViaRest(client, args),
+  })
 }
