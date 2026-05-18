@@ -12,7 +12,7 @@ describe('fetchMessagesViaRest', () => {
   it('calls messages endpoint with session_id', async () => {
     mockClient.get.mockResolvedValue({ data: { messages: [{ id: 1, senderName: 'A', senderPlatformId: 'pa', content: 'Hi', timestamp: 100, type: 0 }], total: 1, page: 1 } })
 
-    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc' })
+    await fetchMessagesViaRest(mockClient, { session_id: 'chat_5_abc', filter_invalid: false })
 
     expect(mockClient.get).toHaveBeenCalledWith(
       '/api/v1/sessions/chat_5_abc/messages',
@@ -126,5 +126,87 @@ describe('fetchMessagesViaRest', () => {
     expect(params).not.toHaveProperty('keyword')
     expect(params).not.toHaveProperty('startTime')
     expect(params).not.toHaveProperty('endTime')
+  })
+})
+
+describe('fetchMessagesViaRest — SQL fast path routing', () => {
+  it('routes to SQL when filter_invalid is true (default) and no keyword', async () => {
+    mockClient.post.mockResolvedValue({
+      data: {
+        columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+        rows: [[1, 100, 0, 'hi', 'pa', 'Alice']],
+      },
+    })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 's1' })
+
+    expect(mockClient.post).toHaveBeenCalledWith(
+      '/api/v1/sessions/s1/sql',
+      expect.objectContaining({ sql: expect.stringContaining('FROM message msg') }),
+    )
+    expect(mockClient.get).not.toHaveBeenCalled()
+  })
+
+  it('routes to REST when keyword is present (FTS5 lives upstream)', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 's1', keyword: 'hello' })
+
+    expect(mockClient.get).toHaveBeenCalled()
+    expect(mockClient.post).not.toHaveBeenCalled()
+  })
+
+  it('routes to REST when filter_invalid is explicitly false', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 's1', filter_invalid: false })
+
+    expect(mockClient.get).toHaveBeenCalled()
+    expect(mockClient.post).not.toHaveBeenCalled()
+  })
+
+  it('SQL path filters system messages and non-text types by default', async () => {
+    mockClient.post.mockResolvedValue({ data: { columns: ['id'], rows: [] } })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 's1' })
+
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toContain('msg.type = 0')
+    expect(sql).toContain("msg.content != ''")
+    expect(sql).toContain("COALESCE(m.account_name, '') != '系统消息'")
+  })
+
+  it('SQL path returns has_more=true when more than `limit` rows returned', async () => {
+    // Request limit+1 trick: 3 limit means SQL returns up to 4 rows
+    mockClient.post.mockResolvedValue({
+      data: {
+        columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+        rows: [
+          [1, 100, 0, 'a', 'p1', 'A'],
+          [2, 200, 0, 'b', 'p2', 'B'],
+          [3, 300, 0, 'c', 'p3', 'C'],
+          [4, 400, 0, 'd', 'p4', 'D'],
+        ],
+      },
+    })
+
+    const result = await fetchMessagesViaRest(mockClient, { session_id: 's1', limit: 3 })
+
+    expect(result.messages).toHaveLength(3)
+    expect(result.has_more).toBe(true)
+  })
+
+  it('SQL path returns has_more=false when fewer than limit+1 rows', async () => {
+    mockClient.post.mockResolvedValue({
+      data: {
+        columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+        rows: [[1, 100, 0, 'a', 'p1', 'A']],
+      },
+    })
+
+    const result = await fetchMessagesViaRest(mockClient, { session_id: 's1', limit: 3 })
+
+    expect(result.has_more).toBe(false)
+    expect(result.messages).toHaveLength(1)
   })
 })

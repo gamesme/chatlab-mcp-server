@@ -7,7 +7,7 @@ import {
   formatMessagesAsPlainText,
   formatToolResultAsText,
 } from '../format.js'
-import { toolError } from './utils.js'
+import { toolError, sqlInternal } from './utils.js'
 
 export interface FetchMessagesParams {
   session_id: string
@@ -29,14 +29,97 @@ export interface FetchMessagesResult {
   has_more?: boolean
 }
 
-/**
- * 拉取消息(REST 通道)。
- * SQL fast path 由 Task 5 增加;本任务先只走 REST。
- */
-export async function fetchMessagesViaRest(
-  client: Pick<ChatLabClient, 'get'>,
+async function fetchMessagesViaSql(
+  client: Pick<ChatLabClient, 'post'>,
   params: FetchMessagesParams,
 ): Promise<FetchMessagesResult> {
+  const page =
+    params.page !== undefined && Number.isFinite(params.page)
+      ? Math.max(1, Math.floor(params.page))
+      : 1
+  const limit =
+    params.limit !== undefined && Number.isFinite(params.limit)
+      ? Math.min(Math.max(1, Math.floor(params.limit)), MESSAGES_PER_PAGE_MAX)
+      : 100
+  const offset = (page - 1) * limit
+
+  const conditions: string[] = ['1=1']
+
+  if (params.type !== undefined && Number.isFinite(params.type)) {
+    conditions.push(`msg.type = ${Math.floor(params.type)}`)
+  } else if (params.filter_invalid !== false) {
+    // default: only text messages
+    conditions.push('msg.type = 0')
+  }
+
+  if (params.start_time !== undefined && Number.isFinite(params.start_time)) {
+    conditions.push(`msg.ts >= ${Math.floor(params.start_time)}`)
+  }
+  if (params.end_time !== undefined && Number.isFinite(params.end_time)) {
+    conditions.push(`msg.ts <= ${Math.floor(params.end_time)}`)
+  }
+  if (params.sender_id !== undefined) {
+    const safe = params.sender_id.replace(/'/g, "''")
+    conditions.push(`m.platform_id = '${safe}'`)
+  }
+
+  // SQL-level filter_invalid (mirrors upstream getRecentMessages)
+  conditions.push("msg.content IS NOT NULL")
+  conditions.push("msg.content != ''")
+  conditions.push("COALESCE(m.account_name, '') != '系统消息'")
+
+  // Request limit+1 rows to detect has_more without a separate COUNT query
+  const sql = `
+    SELECT
+      msg.id AS id,
+      msg.ts AS timestamp,
+      msg.type AS type,
+      msg.content AS content,
+      m.platform_id AS senderPlatformId,
+      COALESCE(m.group_nickname, m.account_name, m.platform_id) AS senderName
+    FROM message msg
+    JOIN member m ON msg.sender_id = m.id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY msg.ts DESC
+    LIMIT ${limit + 1} OFFSET ${offset}
+  `.trim()
+
+  const rows = await sqlInternal(client, params.session_id, sql)
+  const hasMore = rows.length > limit
+  const trimmed = hasMore ? rows.slice(0, limit) : rows
+
+  const messages: RawMessage[] = trimmed.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName,
+    senderPlatformId: r.senderPlatformId,
+    content: r.content,
+    timestamp: r.timestamp,
+    type: r.type,
+  }))
+
+  return { messages, page, has_more: hasMore }
+}
+
+/**
+ * 拉取消息。当无关键字且 filter_invalid 开启(默认)时走 SQL fast path;
+ * 有关键字时走 REST 以利用 FTS5。
+ */
+export async function fetchMessagesViaRest(
+  client: Pick<ChatLabClient, 'get' | 'post'>,
+  params: FetchMessagesParams,
+): Promise<FetchMessagesResult> {
+  // SQL fast path: when no keyword and filter_invalid is on (default),
+  // or when caller explicitly wants only text messages (type=0),
+  // bypass REST and run the filtered SQL directly. Saves bandwidth and
+  // avoids the post-fetch JS filter.
+  const useSqlFastPath =
+    (!params.keyword && params.filter_invalid !== false) || params.type === 0
+
+  if (useSqlFastPath) {
+    return fetchMessagesViaSql(client, params)
+  }
+
+  // ─── REST path (unchanged below) ──────────────────
   const query: Record<string, string> = {}
   if (params.keyword !== undefined) query.keyword = params.keyword
   if (params.start_time !== undefined && Number.isFinite(params.start_time)) {
@@ -107,7 +190,7 @@ const getMessagesSchema = z.object({
 type GetMessagesParams = z.infer<typeof getMessagesSchema>
 
 export async function getMessages(
-  client: Pick<ChatLabClient, 'get'>,
+  client: Pick<ChatLabClient, 'get' | 'post'>,
   params: GetMessagesParams,
 ): Promise<string> {
   const { format = 'text', timezone = 'Asia/Shanghai', merge_consecutive, filter_invalid, ...rest } = params
