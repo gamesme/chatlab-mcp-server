@@ -3,6 +3,34 @@
  * 用于在 MCP server 层面对消息进行省 token 处理
  */
 
+/**
+ * 中间类型:所有"返回消息"的工具内部统一使用。
+ * fetch 层 → RawMessage[] → render 层。
+ *
+ * 字段必须可以从 REST `/messages` 和 POST `/sql` 两条数据通道
+ * 等价地填充——凡是其中一边拿不到的字段都不放进来。
+ */
+export interface RawMessage {
+  /** message.id (数据库主键)。LLM 通过它链式调 get_message_context。 */
+  id: number
+  /** 发送者显示名,优先级: group_nickname → account_name → platform_id */
+  senderName: string
+  /** 发送者跨平台稳定 ID,用于后续按 sender 过滤。 */
+  senderPlatformId: string
+  /** 消息文本内容。可能为 null(图片/语音等非文本消息) */
+  content: string | null
+  /** Unix 秒 */
+  timestamp: number
+  /** 消息类型,见 MESSAGE_TYPES (0=text, 1=image, ...) */
+  type: number
+}
+
+/** 单次拉取消息的最大条数(REST + SQL 通道共享) */
+export const MESSAGES_PER_PAGE_MAX = 500
+
+/** `get_full_conversation` 单次调用累计最多拉取条数 */
+export const FULL_CONVERSATION_TOTAL_MAX = 2000
+
 export interface FormattedMessage {
   id?: number
   senderName: string
