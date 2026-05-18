@@ -1,9 +1,13 @@
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ChatLabClient } from '../client.js'
-import { MESSAGES_PER_PAGE_MAX, type RawMessage } from '../format.js'
+import {
+  MESSAGES_PER_PAGE_MAX,
+  type RawMessage,
+  formatMessagesAsPlainText,
+  formatToolResultAsText,
+} from '../format.js'
 import { toolError } from './utils.js'
-import { formatMessagesAsPlainText, formatToolResultAsText } from '../format.js'
 
 export interface FetchMessagesParams {
   session_id: string
@@ -124,7 +128,7 @@ export async function getMessages(
     }
     if (plainText) details.messages = plainText.split('\n')
     if (result.total !== undefined && sorted.length < result.total) {
-      const nextPage = (result.page ?? 1) + 1
+      const nextPage = result.page + 1
       const remaining = result.total - sorted.length
       details.instruction =
         `还有 ${remaining} 条未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
