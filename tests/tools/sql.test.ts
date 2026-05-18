@@ -45,4 +45,15 @@ describe('executeSQL', () => {
       executeSQL(mockClient as any, 'chat_5_abc', '  SELECT 1')
     ).resolves.toBeDefined()
   })
+
+  it('description mentions all five available tables', () => {
+    const { readFileSync } = require('node:fs')
+    const { join } = require('node:path')
+    const src = readFileSync(join(__dirname, '../../src/tools/sql.ts'), 'utf-8') as string
+    expect(src).toContain('message')
+    expect(src).toContain('member')
+    expect(src).toContain('chat_session')
+    expect(src).toContain('message_fts')
+    expect(src).toContain('member_name_history')
+  })
 })

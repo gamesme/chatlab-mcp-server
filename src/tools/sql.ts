@@ -26,7 +26,7 @@ export async function executeSQL(
 export function registerSQLTools(server: McpServer, client: ChatLabClient): void {
   server.tool(
     'execute_sql',
-    'For statistical aggregation ONLY (COUNT, GROUP BY, SUM, AVG). Do NOT use to fetch message content — use get_messages for that. Max 200 rows returned. Available tables: message, member.',
+    'For statistical aggregation ONLY (COUNT, GROUP BY, SUM, AVG). Do NOT use to fetch message content — use get_messages for that. Max 200 rows returned. Available tables: message, member, chat_session, message_fts, member_name_history.',
     {
       session_id: z.string().describe('Session ID'),
       query: z.string().describe('SQL SELECT query — aggregations only, e.g. COUNT/GROUP BY'),
