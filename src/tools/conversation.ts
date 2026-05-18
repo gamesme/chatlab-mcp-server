@@ -12,6 +12,9 @@ import { fetchMessagesViaRest } from './messages.js'
 export interface FetchFullConversationParams {
   session_id: string
   max_total_messages?: number
+  /** Shared param forwarded to each fetchMessagesViaRest call so the SQL fast path
+   *  can be opted out of. Render-layer params (timezone / merge_consecutive) are
+   *  handled by the messageTool factory and do not appear here. */
   filter_invalid?: boolean
 }
 
@@ -44,7 +47,10 @@ export async function fetchFullConversation(
     lastHasMore = result.has_more
     lastTotal = result.total
 
-    // Stop when this page returned fewer than limit (end of data)
+    // Relies on the SQL fast-path "limit+1" contract and the REST path's
+    // "page < limit means end-of-data" behavior: a full-size page may have more;
+    // a short page means we have reached the end. Both paths in fetchMessagesViaRest
+    // honor this invariant.
     if (result.messages.length < MESSAGES_PER_PAGE_MAX) break
 
     page++

@@ -45,21 +45,92 @@ describe('fetchFullConversation', () => {
       max_total_messages: 3,
     })
 
-    expect(result.messages.length).toBeLessThanOrEqual(3)
+    expect(result.messages.length).toBe(3)
   })
 
   it('clamps max_total_messages at FULL_CONVERSATION_TOTAL_MAX (2000)', async () => {
-    mockClient.post.mockResolvedValue({
-      data: { columns: ['id'], rows: [] },
-    })
+    // Mock the SQL response to always return one full page of 500 + 1 trailing row (501 rows).
+    // With max_total_messages=99999, the function should loop and accumulate; we cap collection.
+    // Provide 4 full pages worth of data; expect accumulation stops at 2000.
+    const fullPage = (offset: number) =>
+      Array.from({ length: 501 }, (_, i) => [offset + i, offset + i, 0, `msg${offset + i}`, 'pa', 'Alice'])
 
-    await fetchFullConversation(mockClient, {
+    mockClient.post
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: fullPage(0),
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: fullPage(500),
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: fullPage(1000),
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: fullPage(1500),
+        },
+      })
+
+    const result = await fetchFullConversation(mockClient, {
       session_id: 's1',
       max_total_messages: 99999,
     })
 
-    // First call should request 501 rows (one full page) at most;
-    // max_total_messages clamp only limits accumulated total.
-    expect(mockClient.post).toHaveBeenCalled()
+    expect(result.messages.length).toBe(2000)
+  })
+
+  it('accumulates messages across multiple pages and reports pagesFetched in extra', async () => {
+    // Page 1: full 500-row page (sqlInternal returns 501 rows; trimmed to 500)
+    const fullPage = Array.from({ length: 501 }, (_, i) => [i, i, 0, `m${i}`, 'pa', 'Alice'])
+    // Page 2: short page (10 rows) → terminates the loop
+    const shortPage = Array.from({ length: 10 }, (_, i) => [500 + i, 500 + i, 0, `m${500 + i}`, 'pa', 'Alice'])
+
+    mockClient.post
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: fullPage,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: shortPage,
+        },
+      })
+
+    const result = await fetchFullConversation(mockClient, {
+      session_id: 's1',
+      max_total_messages: 1000,
+    })
+
+    expect(result.messages.length).toBe(510)
+    expect(result.extra?.pagesFetched).toBe(2)
+  })
+
+  it('forwards filter_invalid=false to the underlying fetch so SQL fast path is bypassed', async () => {
+    // When filter_invalid is false, fetchMessagesViaRest should route to REST not SQL.
+    mockClient.get.mockResolvedValue({
+      data: { messages: [], total: 0, page: 1 },
+    })
+
+    await fetchFullConversation(mockClient, {
+      session_id: 's1',
+      filter_invalid: false,
+      max_total_messages: 50,
+    })
+
+    expect(mockClient.get).toHaveBeenCalled()
+    expect(mockClient.post).not.toHaveBeenCalled()
   })
 })
