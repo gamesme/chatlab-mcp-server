@@ -1,5 +1,4 @@
-import { z, type ZodTypeAny } from 'zod'
-import type { ZodRawShape } from 'zod'
+import { z, type ZodTypeAny, type ZodRawShape } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ChatLabClient } from '../client.js'
 import {
@@ -32,6 +31,11 @@ export interface MessageToolDef<TSchema extends ZodRawShape> {
   /**
    * 拉取消息。只回 RawMessage[] + 元信息;不做排序、不做格式化、不做错误包装。
    * 收到的 args 已经过 zod 验证,且包含 4 个共享参数——但 fetch 不应该读它们。
+   *
+   * NOTE: args is typed `any` deliberately — threading the inferred TSchema
+   * type into the fetch arg requires a non-trivial Zod-infer chain that is
+   * not worth the complexity for now. Task 3 contract tests verify the
+   * shared params are correctly injected at runtime.
    */
   fetch: (args: any) => Promise<MessageFetchResult>
 }
@@ -73,10 +77,10 @@ export function renderMessages(
   // ── JSON 路径 ────────────────────────────────────────
   if ((opts.format ?? 'text') === 'json') {
     const payload: Record<string, unknown> = {
+      ...result.extra,
       total: result.total ?? sorted.length,
       returned: sorted.length,
       ...(result.page !== undefined && { page: result.page }),
-      ...result.extra,
       messages: sorted,
     }
     if (hasMore) {
@@ -94,10 +98,10 @@ export function renderMessages(
   })
 
   const details: Record<string, unknown> = {
+    ...result.extra,
     total: result.total ?? sorted.length,
     returned: sorted.length,
     ...(result.page !== undefined && { page: result.page }),
-    ...result.extra,
   }
   if (plainText) details.messages = plainText.split('\n')
 
