@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchMessagesViaRest } from '../../src/tools/messages.js'
+import { fetchMessagesViaRest, getMessages } from '../../src/tools/messages.js'
 
 const mockClient: any = { get: vi.fn(), post: vi.fn() }
 
@@ -127,6 +127,21 @@ describe('fetchMessagesViaRest', () => {
     expect(params).not.toHaveProperty('startTime')
     expect(params).not.toHaveProperty('endTime')
   })
+
+  it('forwards filter_invalid through getMessages so callers can opt out of SQL', async () => {
+    mockClient.get.mockResolvedValue({
+      data: { messages: [], total: 0, page: 1 },
+    })
+
+    await getMessages(mockClient, {
+      session_id: 's1',
+      filter_invalid: false,
+      keyword: undefined,
+    })
+
+    expect(mockClient.get).toHaveBeenCalled()
+    expect(mockClient.post).not.toHaveBeenCalled()
+  })
 })
 
 describe('fetchMessagesViaRest — SQL fast path routing', () => {
@@ -208,5 +223,34 @@ describe('fetchMessagesViaRest — SQL fast path routing', () => {
 
     expect(result.has_more).toBe(false)
     expect(result.messages).toHaveLength(1)
+  })
+
+  it('routes to REST when both keyword and type=0 are present (keyword wins)', async () => {
+    mockClient.get.mockResolvedValue({ data: { messages: [], total: 0, page: 1 } })
+
+    await fetchMessagesViaRest(mockClient, { session_id: 's1', keyword: 'hello', type: 0 })
+
+    expect(mockClient.get).toHaveBeenCalled()
+    expect(mockClient.post).not.toHaveBeenCalled()
+  })
+
+  it('getMessages emits a pagination instruction when SQL path reports has_more', async () => {
+    // 4 rows for limit=3 → has_more=true
+    mockClient.post.mockResolvedValue({
+      data: {
+        columns: ['id', 'timestamp', 'type', 'content', 'senderPlatformId', 'senderName'],
+        rows: [
+          [1, 100, 0, 'a', 'p1', 'A'],
+          [2, 200, 0, 'b', 'p2', 'B'],
+          [3, 300, 0, 'c', 'p3', 'C'],
+          [4, 400, 0, 'd', 'p4', 'D'],
+        ],
+      },
+    })
+
+    const text = await getMessages(mockClient, { session_id: 's1', limit: 3 })
+
+    expect(text).toContain('page=2')
+    expect(text).toContain('s1')
   })
 })

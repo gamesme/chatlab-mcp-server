@@ -113,7 +113,8 @@ export async function fetchMessagesViaRest(
   // bypass REST and run the filtered SQL directly. Saves bandwidth and
   // avoids the post-fetch JS filter.
   const useSqlFastPath =
-    (!params.keyword && params.filter_invalid !== false) || params.type === 0
+    !params.keyword &&
+    (params.filter_invalid !== false || params.type === 0)
 
   if (useSqlFastPath) {
     return fetchMessagesViaSql(client, params)
@@ -194,7 +195,7 @@ export async function getMessages(
   params: GetMessagesParams,
 ): Promise<string> {
   const { format = 'text', timezone = 'Asia/Shanghai', merge_consecutive, filter_invalid, ...rest } = params
-  const result = await fetchMessagesViaRest(client, rest as FetchMessagesParams)
+  const result = await fetchMessagesViaRest(client, { ...rest, filter_invalid } as FetchMessagesParams)
 
   const sorted = [...result.messages].sort((a, b) => a.timestamp - b.timestamp)
 
@@ -215,6 +216,10 @@ export async function getMessages(
       const remaining = result.total - sorted.length
       details.instruction =
         `还有 ${remaining} 条未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
+    } else if (result.has_more) {
+      const nextPage = result.page + 1
+      details.instruction =
+        `还有更多消息未显示。调用 get_messages(session_id="${params.session_id}", page=${nextPage}) 获取下一页`
     }
     return formatToolResultAsText(details)
   }
