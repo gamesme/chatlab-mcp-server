@@ -641,44 +641,6 @@ export async function getResponseTimeAnalysis(
   return formatToolResultAsText({ topN, returned: rows.length, pairs: lines })
 }
 
-const keywordFrequencySchema = z.object({
-  session_id: z.string().describe('Session ID (unused; tool returns info only)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-})
-
-export type KeywordFrequencyParams = z.infer<typeof keywordFrequencySchema>
-
-const KEYWORD_FREQUENCY_MESSAGE = `keyword_frequency is not implemented in chatlab-mcp-server.
-
-This feature requires CJK word segmentation (jieba / kuromoji), which the MCP
-server does not bundle to keep the package lightweight.
-
-Alternatives:
-1. Run keyword_frequency in the ChatLab desktop app (Insights > Word Cloud).
-2. Use execute_sql with LIKE patterns for known phrases:
-     SELECT content, COUNT(*) AS c FROM message
-     WHERE content LIKE '%<phrase>%'
-     GROUP BY content ORDER BY c DESC LIMIT 20
-3. Use get_messages with a keyword filter and count occurrences in your reply.`
-
-const KEYWORD_FREQUENCY_ALTERNATIVES = [
-  "Run keyword_frequency in the ChatLab desktop app (Insights > Word Cloud).",
-  "Use execute_sql with LIKE patterns to count occurrences of known phrases.",
-  "Use get_messages with a keyword filter and count in the LLM response.",
-]
-
-export async function keywordFrequency(params: KeywordFrequencyParams): Promise<string> {
-  void params.session_id
-  if (params.format === 'json') {
-    return JSON.stringify(
-      { message: KEYWORD_FREQUENCY_MESSAGE, available_alternatives: KEYWORD_FREQUENCY_ALTERNATIVES },
-      null,
-      2
-    )
-  }
-  return KEYWORD_FREQUENCY_MESSAGE
-}
-
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
   registerMessageTool(server, client, {
     name: 'get_message_context',
@@ -794,17 +756,4 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     }
   )
 
-  server.tool(
-    'keyword_frequency',
-    'Word/keyword frequency analysis. Currently not implemented in the MCP server due to NLP dependency size; returns a stub message with alternative approaches.',
-    keywordFrequencySchema.shape,
-    async (args) => {
-      try {
-        const text = await keywordFrequency(args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
 }
