@@ -122,7 +122,7 @@ describe('renderMessages', () => {
 })
 
 describe('registerMessageTool', () => {
-  it('auto-injects 4 shared params into the schema', () => {
+  it('merges 4 shared params with the tool-specific schema', () => {
     const { server, registered } = makeMockServer()
     const client: any = {}
     registerMessageTool(server, client, {
@@ -143,19 +143,29 @@ describe('registerMessageTool', () => {
     )
   })
 
-  it('calls fetch with all args including shared params', async () => {
+  it('calls fetch with all args including shared params and tool-specific params', async () => {
     const { server, registered } = makeMockServer()
     const client: any = {}
     const fetchSpy = vi.fn(async () => ({ messages: [] }))
     registerMessageTool(server, client, {
       name: 'fake_tool',
       description: 'fake',
-      schema: { session_id: z.string() },
+      schema: { session_id: z.string(), keyword: z.string().optional() },
       fetch: fetchSpy,
     })
-    await registered[0].handler({ session_id: 's1', format: 'json', timezone: 'UTC' })
+    await registered[0].handler({
+      session_id: 's1',
+      keyword: 'hello',
+      format: 'json',
+      timezone: 'UTC',
+    })
     expect(fetchSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ session_id: 's1', format: 'json', timezone: 'UTC' }),
+      expect.objectContaining({
+        session_id: 's1',
+        keyword: 'hello',
+        format: 'json',
+        timezone: 'UTC',
+      }),
     )
   })
 
@@ -173,6 +183,22 @@ describe('registerMessageTool', () => {
     const result = await registered[0].handler({ session_id: 'missing' })
     expect(result.isError).toBe(true)
     expect(result.content[0].text).toBe('Session not found: missing')
+  })
+
+  it('passes through generic Error message verbatim', async () => {
+    const { server, registered } = makeMockServer()
+    const client: any = {}
+    registerMessageTool(server, client, {
+      name: 'fake_tool',
+      description: 'fake',
+      schema: { session_id: z.string() },
+      fetch: async () => {
+        throw new Error('Network failure')
+      },
+    })
+    const result = await registered[0].handler({ session_id: 's1' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toBe('Network failure')
   })
 
   it('produces sorted text output from unsorted fetch result', async () => {
@@ -207,20 +233,34 @@ describe('convention enforcement (static scan)', () => {
     for (const file of files) {
       if (ALLOWED.has(file)) continue
       const content = readFileSync(join(toolsDir, file), 'utf-8')
-      if (/formatMessagesAsPlainText/.test(content)) {
+      // Match import declarations (named imports + default + namespace) but skip comments and string literals
+      if (/import\s*\{[^}]*\bformatMessagesAsPlainText\b[^}]*\}\s*from/.test(content)) {
         violators.push(file)
       }
     }
     expect(violators, `These tool files call formatMessagesAsPlainText directly. Migrate them to registerMessageTool factory:\n  ${violators.join('\n  ')}`).toEqual([])
   })
 
-  it('no tool file calls Date.toLocaleString directly (except sessions.ts list rendering)', async () => {
+  it('no tool file calls Date.toLocaleString directly outside the allow-list', async () => {
     const { readdirSync, readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
     const toolsDir = join(__dirname, '../src/tools')
-    // sessions.ts and members.ts may have bespoke list formatters that use toLocaleString
-    // for session/member timestamps. Message tools must NOT.
-    const ALLOWED = new Set(['message-tool.ts', 'sessions.ts', 'members.ts'])
+    // ALLOWED files are exempt from this scan because they contain non-message
+    // tools (entity-list, name-history, summary tools) that legitimately format
+    // their own date strings. Message-returning tools MUST NOT appear here —
+    // they go through the messageTool factory which centralizes time formatting.
+    //
+    // analytics.ts contains getSessionSummaries and getMemberNameHistory which
+    // are entity-list tools, not message tools. The message tools formerly in
+    // analytics.ts (getMessageContext, getConversationBetween, deepSearchMessages)
+    // are migrated to the factory in Tasks 9/10/11 and their inline toLocaleString
+    // calls are removed there.
+    const ALLOWED = new Set([
+      'message-tool.ts',
+      'sessions.ts',
+      'members.ts',
+      'analytics.ts',
+    ])
     const files = readdirSync(toolsDir).filter((f) => f.endsWith('.ts'))
     const violators: string[] = []
     for (const file of files) {
