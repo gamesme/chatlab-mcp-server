@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 import { ChatLabClient } from '../client.js'
 import { toolError } from './utils.js'
-import { formatStatsOverviewAsText } from '../format.js'
+import { formatToolResultAsText } from '../format.js'
 
 const MESSAGE_TYPES: Record<string, string> = {
   '0': 'text', '1': 'image', '2': 'voice', '3': 'video', '4': 'emoji',
@@ -27,7 +27,7 @@ export async function getStatsOverview(
   }
 
   if (format === 'text') {
-    return formatStatsOverviewAsText(res.data)
+    return formatToolResultAsText(res.data ?? {})
   }
 
   return JSON.stringify(res, null, 2)
