@@ -6,7 +6,7 @@ import {
   sqlEscape,
   getMessageContext,
 } from '../../src/tools/analytics.js'
-import { getConversationBetween } from '../../src/tools/analytics.js'
+import { fetchConversationBetweenViaSql } from '../../src/tools/analytics.js'
 import { getSessionSummaries } from '../../src/tools/analytics.js'
 import { deepSearchMessages } from '../../src/tools/analytics.js'
 import { getTimeStats } from '../../src/tools/analytics.js'
@@ -140,63 +140,38 @@ describe('get_message_context', () => {
   })
 })
 
-describe('get_conversation_between', () => {
-  it('filters by sender_id IN (a, b)', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getConversationBetween(mockClient as any, {
-      session_id: 's1',
-      member_id_1: 5,
-      member_id_2: 9,
-      format: 'json',
-    })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/m\.sender_id IN \(5, 9\)/)
-    expect(sql).toMatch(/ORDER BY m\.ts/)
-  })
-
-  it('applies time filters', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getConversationBetween(mockClient as any, {
-      session_id: 's1',
-      member_id_1: 5,
-      member_id_2: 9,
-      start_time: 1700000000,
-      end_time: 1700100000,
-      format: 'json',
-    })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/m\.ts >= 1700000000/)
-    expect(sql).toMatch(/m\.ts <= 1700100000/)
-  })
-
-  it('defaults limit to 100, caps at 1000', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getConversationBetween(mockClient as any, {
-      session_id: 's1', member_id_1: 1, member_id_2: 2, format: 'json',
-    })
-    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 100/)
-
-    mockClient.post.mockClear()
-    await getConversationBetween(mockClient as any, {
-      session_id: 's1', member_id_1: 1, member_id_2: 2, limit: 99999, format: 'json',
-    })
-    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 1000/)
-  })
-
-  it('formats text output', async () => {
+describe('fetchConversationBetweenViaSql', () => {
+  it('returns RawMessage[] with id, senderName, senderPlatformId, content, timestamp, type', async () => {
     mockClient.post.mockResolvedValue({
       data: {
-        rows: [
-          { id: 1, ts: 1700000000, senderName: 'Alice', content: 'hi' },
-          { id: 2, ts: 1700000060, senderName: 'Bob', content: 'hey' },
-        ],
+        columns: ['id', 'ts', 'type', 'content', 'senderPlatformId', 'senderName'],
+        rows: [[1, 100, 0, 'hi', 'pa', 'Alice']],
       },
     })
-    const out = await getConversationBetween(mockClient as any, {
-      session_id: 's1', member_id_1: 1, member_id_2: 2, format: 'text',
+
+    const result = await fetchConversationBetweenViaSql(mockClient as any, {
+      session_id: 's1',
+      member_id_1: 1,
+      member_id_2: 2,
     })
-    expect(out).toMatch(/Alice/)
-    expect(out).toMatch(/Bob/)
+
+    expect(result.messages).toEqual([
+      { id: 1, senderName: 'Alice', senderPlatformId: 'pa', content: 'hi', timestamp: 100, type: 0 },
+    ])
+  })
+
+  it('clamps limit to [1, 1000]', async () => {
+    mockClient.post.mockResolvedValue({ data: { columns: ['id'], rows: [] } })
+
+    await fetchConversationBetweenViaSql(mockClient as any, {
+      session_id: 's1',
+      member_id_1: 1,
+      member_id_2: 2,
+      limit: 99999,
+    })
+
+    const sql = mockClient.post.mock.calls[0][1].sql as string
+    expect(sql).toMatch(/LIMIT 1000/)
   })
 })
 

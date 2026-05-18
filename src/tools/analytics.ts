@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { ChatLabClient } from '../client.js'
 import { toolError, sqlInternal } from './utils.js'
 import { formatToolResultAsText } from '../format.js'
+import type { RawMessage } from '../format.js'
+import type { MessageFetchResult } from './message-tool.js'
+import { registerMessageTool } from './message-tool.js'
 
 /**
  * Build SQL fragment for optional ts range filter.
@@ -145,69 +148,55 @@ export async function getMessageContext(
   return formatToolResultAsText(details)
 }
 
-const getConversationBetweenSchema = z.object({
-  session_id: z.string().describe('Session ID'),
-  member_id_1: z.number().finite().describe('First member numeric ID (from get_members)'),
-  member_id_2: z.number().finite().describe('Second member numeric ID (from get_members)'),
-  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
-  limit: z.number().finite().optional().describe('Max messages (default 100, max 1000)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
-})
+export interface FetchConversationBetweenParams {
+  session_id: string
+  member_id_1: number
+  member_id_2: number
+  start_time?: number
+  end_time?: number
+  limit?: number
+}
 
-export type GetConversationBetweenParams = z.infer<typeof getConversationBetweenSchema>
-
-export async function getConversationBetween(
+export async function fetchConversationBetweenViaSql(
   client: Pick<ChatLabClient, 'post'>,
-  params: GetConversationBetweenParams
-): Promise<string> {
-  const {
-    session_id, member_id_1, member_id_2,
-    start_time, end_time, format = 'text', timezone = 'Asia/Shanghai',
-  } = params
-  const limit = params.limit !== undefined && Number.isFinite(params.limit)
-    ? Math.min(Math.max(params.limit, 1), 1000)
-    : 100
+  params: FetchConversationBetweenParams,
+): Promise<MessageFetchResult> {
+  const limit =
+    params.limit !== undefined && Number.isFinite(params.limit)
+      ? Math.min(Math.max(1, Math.floor(params.limit)), 1000)
+      : 100
 
   const sql = `
-    SELECT m.id, m.ts, m.type, m.content,
-           mem.platform_id AS senderPlatformId,
-           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    SELECT
+      m.id AS id,
+      m.ts AS ts,
+      m.type AS type,
+      m.content AS content,
+      mem.platform_id AS senderPlatformId,
+      COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
     FROM message m
     JOIN member mem ON m.sender_id = mem.id
-    WHERE m.sender_id IN (${Math.floor(member_id_1)}, ${Math.floor(member_id_2)})
-      ${buildTimeFilter(start_time, end_time, 'm.ts')}
+    WHERE m.sender_id IN (${Math.floor(params.member_id_1)}, ${Math.floor(params.member_id_2)})
+      ${buildTimeFilter(params.start_time, params.end_time, 'm.ts')}
     ORDER BY m.ts, m.id
     LIMIT ${limit}
   `.trim()
 
-  const rows = await sqlInternal(client, session_id, sql)
+  const rows = await sqlInternal(client, params.session_id, sql)
 
-  if (rows.length === 0) {
-    return format === 'json'
-      ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2)
-      : 'No conversation found between these two members in the given range.'
+  const messages: RawMessage[] = rows.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName,
+    senderPlatformId: r.senderPlatformId,
+    content: r.content,
+    timestamp: r.ts,
+    type: r.type,
+  }))
+
+  return {
+    messages,
+    extra: { member_id_1: params.member_id_1, member_id_2: params.member_id_2 },
   }
-
-  if (format === 'json') {
-    return JSON.stringify({ total: rows.length, returned: rows.length, rawMessages: rows }, null, 2)
-  }
-
-  const lines = rows.map((r) => {
-    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
-      timeZone: timezone,
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-    return `${time} ${r.senderName}: ${r.content ?? '[no content]'}`
-  })
-
-  return formatToolResultAsText({
-    total: rows.length,
-    returned: rows.length,
-    member_id_1, member_id_2,
-    messages: lines,
-  })
 }
 
 const getSessionSummariesSchema = z.object({
@@ -699,19 +688,20 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     }
   )
 
-  server.tool(
-    'get_conversation_between',
-    'Get messages between two specific members (interleaved by time). Use when the user asks "what did A and B talk about". Members must be referenced by their numeric DB id; call get_members first to look them up.',
-    getConversationBetweenSchema.shape,
-    async (args) => {
-      try {
-        const text = await getConversationBetween(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
+  registerMessageTool(server, client, {
+    name: 'get_conversation_between',
+    description:
+      'Get messages between two specific members (interleaved by time). Use when the user asks "what did A and B talk about". Members must be referenced by their numeric DB id (from get_members).',
+    schema: {
+      session_id: z.string().describe('Session ID'),
+      member_id_1: z.number().finite().describe('First member numeric ID (from get_members)'),
+      member_id_2: z.number().finite().describe('Second member numeric ID (from get_members)'),
+      start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+      end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
+      limit: z.number().finite().optional().describe('Max messages (default 100, max 1000)'),
+    } as const,
+    fetch: (args) => fetchConversationBetweenViaSql(client, args),
+  })
 
   server.tool(
     'get_session_summaries',
