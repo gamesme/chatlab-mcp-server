@@ -88,7 +88,7 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 |------|-------------|
 | `list_sessions` | List all imported chat sessions with name, platform, and message count |
 | `get_session` | Get details of a single session by ID |
-| `get_messages` | Retrieve messages with filters: keyword, time range, sender, pagination (default 100/call) |
+| `get_messages` | Retrieve messages with filters: keyword, time range, sender, pagination (default `limit` 100, max 500) |
 | `get_full_conversation` | Full chronological message history for a session |
 | `get_members` | List all members in a session with their platformId and message count |
 | `get_stats_overview` | Statistical overview: message counts, member activity, type distribution, time range |
@@ -113,8 +113,8 @@ All message-returning tools (`get_messages`, `get_full_conversation`, `get_messa
 | Param | Default | Description |
 |-------|---------|-------------|
 | `format` | `text` | `text` or `json` |
-| `timezone` | `UTC` | IANA timezone for timestamps (e.g. `America/New_York`) |
-| `merge_consecutive` | `false` | Merge back-to-back messages from the same sender |
+| `timezone` | `Asia/Shanghai` | IANA timezone for date display (e.g. `Asia/Shanghai`, `America/New_York`, `UTC`) |
+| `merge_consecutive` | `true` | Merge back-to-back messages from the same sender |
 | `filter_invalid` | `true` | Skip system/empty messages at the SQL layer |
 
 ### Notes
@@ -134,7 +134,7 @@ All message-returning tools (`get_messages`, `get_full_conversation`, `get_messa
 
 ### Improvements
 
-- All 6 message-returning tools now support shared params: `format`, `timezone`, `merge_consecutive`, `filter_invalid`. Previously these worked only on `get_messages` and the two conversation tools.
+- All 5 message-returning tools now support shared params: `format`, `timezone`, `merge_consecutive`, `filter_invalid`. Previously these worked only on `get_messages` and the two conversation tools.
 - `get_messages` default `limit` increased from 20 → 100.
 - `get_messages` now returns `id` and `senderPlatformId` per message so `get_message_context` can be called as a follow-up.
 - `get_messages` with `filter_invalid=true` (default) now filters at the SQL layer, saving bandwidth.

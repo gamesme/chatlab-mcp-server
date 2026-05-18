@@ -42,7 +42,7 @@ AI Assistant (Claude Desktop / Cursor / Agent)
 - `src/client.ts` — fetch wrapper with Bearer auth and structured error handling
 - `src/server.ts` — create `McpServer`, register all tools
 - `src/tools/` — one file per tool group (`sessions.ts`, `messages.ts`, `conversation.ts`, `members.ts`, `stats.ts`, `sql.ts`, `analytics.ts`)
-- `src/tools/message-tool.ts` — `registerMessageTool` factory shared by all 6 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`). Provides unified `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params.
+- `src/tools/message-tool.ts` — `registerMessageTool` factory shared by the 5 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`). Provides unified `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params.
 
 ## Tools → API Mapping
 
@@ -51,7 +51,7 @@ AI Assistant (Claude Desktop / Cursor / Agent)
 | `list_sessions` | `GET /sessions` |
 | `get_session` | `GET /sessions/:id` |
 | `get_messages` | `POST /sessions/:id/sql` (filtered messages query) |
-| `get_full_conversation` | `POST /sessions/:id/sql` |
+| `get_full_conversation` | `POST /sessions/:id/sql` (or `GET /sessions/:id/messages` when `filter_invalid=false`) |
 | `get_members` | `GET /sessions/:id/members` |
 | `get_stats_overview` | `GET /sessions/:id/stats/overview` |
 | `execute_sql` | `POST /sessions/:id/sql` (SELECT only) |
@@ -64,7 +64,7 @@ AI Assistant (Claude Desktop / Cursor / Agent)
 | `get_member_name_history` | `POST /sessions/:id/sql` |
 | `get_response_time_analysis` | `POST /sessions/:id/sql` |
 
-The 6 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`, plus `get_session_summaries`) all share the `registerMessageTool` factory which adds `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params.
+The 5 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`) all share the `registerMessageTool` factory which adds `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params. `get_session_summaries` returns summary entities, not messages, and uses raw `server.tool` directly.
 
 `execute_sql` is the analytical escape hatch — use it for arbitrary aggregation queries. Available tables: `message`, `member`, `chat_session`, `message_fts`, `member_name_history`.
 
