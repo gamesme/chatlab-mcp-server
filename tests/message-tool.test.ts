@@ -241,6 +241,36 @@ describe('convention enforcement (static scan)', () => {
     expect(violators, `These tool files call formatMessagesAsPlainText directly. Migrate them to registerMessageTool factory:\n  ${violators.join('\n  ')}`).toEqual([])
   })
 
+  it('no tool file imports formatStatsOverviewAsText (removed in Task 14)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const toolsDir = join(__dirname, '../src/tools')
+    const files = readdirSync(toolsDir).filter((f) => f.endsWith('.ts'))
+    const violators: string[] = []
+    for (const file of files) {
+      const content = readFileSync(join(toolsDir, file), 'utf-8')
+      if (/formatStatsOverviewAsText/.test(content)) {
+        violators.push(file)
+      }
+    }
+    expect(violators).toEqual([])
+  })
+
+  it('no tool file imports getConversationText (function removed in Task 7)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const toolsDir = join(__dirname, '../src/tools')
+    const files = readdirSync(toolsDir).filter((f) => f.endsWith('.ts'))
+    const violators: string[] = []
+    for (const file of files) {
+      const content = readFileSync(join(toolsDir, file), 'utf-8')
+      if (/getConversationText\(/.test(content)) {
+        violators.push(`${file}:getConversationText`)
+      }
+    }
+    expect(violators).toEqual([])
+  })
+
   it('no tool file calls Date.toLocaleString directly outside the allow-list', async () => {
     const { readdirSync, readFileSync } = await import('node:fs')
     const { join } = await import('node:path')
