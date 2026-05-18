@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`chatlab-mcp` is a TypeScript MCP (Model Context Protocol) server that bridges ChatLab's local REST API with AI assistants (Claude Desktop, Cursor, custom agents). It runs as a stdio process and exposes 7 tools for querying chat history.
+`chatlab-mcp` is a TypeScript MCP (Model Context Protocol) server that bridges ChatLab's local REST API with AI assistants (Claude Desktop, Cursor, custom agents). It runs as a stdio process and exposes 15 tools for querying chat history.
 
 **ChatLab API base:** `http://127.0.0.1:5200/api/v1`
 **Auth:** Bearer token via `CHATLAB_TOKEN` env var or `--token` CLI flag
@@ -28,7 +28,7 @@ AI Assistant (Claude Desktop / Cursor / Agent)
   ┌─────────────────────────────┐
   │  src/index.ts  (entry)      │
   │  src/server.ts (McpServer)  │
-  │  src/tools/    (7 tools)    │
+  │  src/tools/    (15 tools)   │
   │  src/client.ts (HTTP)       │
   └────────────┬────────────────┘
                │  HTTP + Bearer Token
@@ -41,7 +41,8 @@ AI Assistant (Claude Desktop / Cursor / Agent)
 - `src/index.ts` — parse CLI args (`--url`, `--token`) / env vars, connect stdio transport
 - `src/client.ts` — fetch wrapper with Bearer auth and structured error handling
 - `src/server.ts` — create `McpServer`, register all tools
-- `src/tools/` — one file per tool group (`sessions.ts`, `messages.ts`, `members.ts`, `stats.ts`, `sql.ts`, `export.ts`)
+- `src/tools/` — one file per tool group (`sessions.ts`, `messages.ts`, `conversation.ts`, `members.ts`, `stats.ts`, `sql.ts`, `analytics.ts`)
+- `src/tools/message-tool.ts` — `registerMessageTool` factory shared by all 6 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`). Provides unified `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params.
 
 ## Tools → API Mapping
 
@@ -49,13 +50,23 @@ AI Assistant (Claude Desktop / Cursor / Agent)
 |------|--------------|
 | `list_sessions` | `GET /sessions` |
 | `get_session` | `GET /sessions/:id` |
-| `get_messages` | `GET /sessions/:id/messages` |
+| `get_messages` | `POST /sessions/:id/sql` (filtered messages query) |
+| `get_full_conversation` | `POST /sessions/:id/sql` |
 | `get_members` | `GET /sessions/:id/members` |
 | `get_stats_overview` | `GET /sessions/:id/stats/overview` |
 | `execute_sql` | `POST /sessions/:id/sql` (SELECT only) |
-| `export_session` | `GET /sessions/:id/export` |
+| `get_message_context` | `POST /sessions/:id/sql` (time-window expansion) |
+| `get_conversation_between` | `POST /sessions/:id/sql` |
+| `get_session_summaries` | `POST /sessions/:id/sql` |
+| `deep_search_messages` | `POST /sessions/:id/sql` (FTS5) |
+| `get_time_stats` | `POST /sessions/:id/sql` |
+| `get_member_activity` | `POST /sessions/:id/sql` |
+| `get_member_name_history` | `POST /sessions/:id/sql` |
+| `get_response_time_analysis` | `POST /sessions/:id/sql` |
 
-`execute_sql` is the analytical escape hatch — use it for word frequency, member interaction, activity breakdown until dedicated stat endpoints exist upstream.
+The 6 message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`, plus `get_session_summaries`) all share the `registerMessageTool` factory which adds `format`, `timezone`, `merge_consecutive`, and `filter_invalid` params.
+
+`execute_sql` is the analytical escape hatch — use it for arbitrary aggregation queries. Available tables: `message`, `member`, `chat_session`, `message_fts`, `member_name_history`.
 
 ## Error Handling Contract
 
