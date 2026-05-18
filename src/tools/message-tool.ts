@@ -87,7 +87,7 @@ export function renderMessages(
   }
 
   // ── Text 路径 ────────────────────────────────────────
-  const plainText = formatMessagesAsPlainText(sorted as any, {
+  const plainText = formatMessagesAsPlainText(sorted, {
     mergeConsecutive: opts.merge_consecutive ?? true,
     filterInvalid: opts.filter_invalid ?? true,
     timezone: opts.timezone ?? 'Asia/Shanghai',
