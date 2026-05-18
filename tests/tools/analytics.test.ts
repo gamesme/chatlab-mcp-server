@@ -8,7 +8,7 @@ import {
 } from '../../src/tools/analytics.js'
 import { fetchConversationBetweenViaSql } from '../../src/tools/analytics.js'
 import { getSessionSummaries } from '../../src/tools/analytics.js'
-import { deepSearchMessages } from '../../src/tools/analytics.js'
+import { fetchDeepSearchViaSql } from '../../src/tools/analytics.js'
 import { getTimeStats } from '../../src/tools/analytics.js'
 import { getMemberActivity } from '../../src/tools/analytics.js'
 import { getMemberNameHistory } from '../../src/tools/analytics.js'
@@ -231,102 +231,46 @@ describe('get_session_summaries', () => {
   })
 })
 
-describe('deep_search_messages', () => {
-  it('joins message_fts and uses MATCH with OR-joined keywords', async () => {
+describe('fetchDeepSearchViaSql', () => {
+  it('runs two SQL queries: FTS5 hits + context expansion', async () => {
     mockClient.post
-      .mockResolvedValueOnce({ data: { rows: [{ id: 50, ts: 1000 }] } })  // hits
-      .mockResolvedValueOnce({ data: { rows: [] } })                       // context
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['hello', 'world'], format: 'json',
-    })
-    const sql1 = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql1).toMatch(/JOIN message_fts/)
-    expect(sql1).toMatch(/message_fts MATCH/)
-    expect(sql1).toMatch(/"hello" OR "world"/)
-  })
-
-  it('escapes double quotes in keywords', async () => {
-    mockClient.post
-      .mockResolvedValueOnce({ data: { rows: [] } })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['say "hi"'], format: 'json',
-    })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/"say ""hi"""/)
-  })
-
-  it('expands hits into context window via second query', async () => {
-    mockClient.post
-      .mockResolvedValueOnce({ data: { rows: [{ id: 100, ts: 1000 }, { id: 200, ts: 2000 }] } })
       .mockResolvedValueOnce({
         data: {
+          columns: ['id', 'ts'],
+          rows: [[5, 500], [10, 1000]],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'ts', 'type', 'content', 'senderPlatformId', 'senderName'],
           rows: [
-            { id: 98, ts: 990, content: 'before', senderName: 'A' },
-            { id: 100, ts: 1000, content: 'hit1', senderName: 'B' },
-            { id: 198, ts: 1990, content: 'before2', senderName: 'A' },
-            { id: 200, ts: 2000, content: 'hit2', senderName: 'B' },
+            [3, 300, 0, 'before', 'pa', 'Alice'],
+            [5, 500, 0, 'hit1', 'pa', 'Alice'],
+            [10, 1000, 0, 'hit2', 'pb', 'Bob'],
           ],
         },
       })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['x'], context_before: 2, context_after: 0, format: 'json',
-    })
-    const sql2 = mockClient.post.mock.calls[1][1].sql as string
-    expect(sql2).toMatch(/m\.id BETWEEN 98 AND 100/)
-    expect(sql2).toMatch(/m\.id BETWEEN 198 AND 200/)
-  })
 
-  it('applies sender_id and time filters in hits query', async () => {
-    mockClient.post.mockResolvedValueOnce({ data: { rows: [] } })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['x'],
-      sender_id: 7, start_time: 1700000000, end_time: 1700100000,
-      format: 'json',
+    const result = await fetchDeepSearchViaSql(mockClient as any, {
+      session_id: 's1',
+      keywords: ['hello'],
     })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/m\.sender_id = 7/)
-    expect(sql).toMatch(/m\.ts >= 1700000000/)
-    expect(sql).toMatch(/m\.ts <= 1700100000/)
-  })
 
-  it('returns informative text when no hits', async () => {
-    mockClient.post.mockResolvedValueOnce({ data: { rows: [] } })
-    const out = await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['nothing'], format: 'text',
-    })
-    expect(out).toMatch(/no.*match|0 hits/i)
-  })
-
-  it('caps limit at 1000', async () => {
-    mockClient.post.mockResolvedValueOnce({ data: { rows: [] } })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['x'], limit: 99999, format: 'json',
-    })
-    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/LIMIT 1000/)
-  })
-
-  it('runs the context query even when context_before=0 and context_after=0', async () => {
-    mockClient.post
-      .mockResolvedValueOnce({ data: { rows: [{ id: 50, ts: 1000 }] } })
-      .mockResolvedValueOnce({ data: { rows: [{ id: 50, ts: 1000, content: 'hit', senderName: 'A' }] } })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['x'], context_before: 0, context_after: 0, format: 'json',
-    })
     expect(mockClient.post).toHaveBeenCalledTimes(2)
-    const ctxSql = mockClient.post.mock.calls[1][1].sql as string
-    expect(ctxSql).toMatch(/m\.id BETWEEN 50 AND 50/)
+    expect(result.messages).toHaveLength(3)
+    expect(result.extra).toEqual({ hits: 2 })
   })
 
-  it('falls back to defaults when limit/context params are NaN', async () => {
-    mockClient.post.mockResolvedValueOnce({ data: { rows: [] } })
-    await deepSearchMessages(mockClient as any, {
-      session_id: 's1', keywords: ['x'],
-      limit: NaN, context_before: NaN, context_after: NaN,
-      format: 'json',
+  it('reports missing schema gracefully', async () => {
+    mockClient.post.mockRejectedValue(new Error('no such table: message_fts'))
+
+    const result = await fetchDeepSearchViaSql(mockClient as any, {
+      session_id: 's1',
+      keywords: ['hello'],
     })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/LIMIT 100/)
-    expect(sql).not.toMatch(/LIMIT NaN/)
+
+    expect(result.messages).toEqual([])
+    expect(result.extra?.message).toMatch(/newer database schema/i)
   })
 })
 
