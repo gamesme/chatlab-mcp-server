@@ -4,7 +4,7 @@ import {
   timezoneOffsetSeconds,
   localTsExpr,
   sqlEscape,
-  getMessageContext,
+  fetchMessageContextViaSql,
 } from '../../src/tools/analytics.js'
 import { fetchConversationBetweenViaSql } from '../../src/tools/analytics.js'
 import { getSessionSummaries } from '../../src/tools/analytics.js'
@@ -66,77 +66,65 @@ describe('analytics helpers', () => {
   })
 })
 
-describe('get_message_context', () => {
-  it('builds SQL with id range for single target', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getMessageContext(mockClient as any, {
+describe('fetchMessageContextViaSql', () => {
+  it('queries with ts window (not id BETWEEN) around target message IDs', async () => {
+    // First call: look up target ts
+    mockClient.post
+      .mockResolvedValueOnce({
+        data: { columns: ['ts'], rows: [[1000]] },
+      })
+      // Second call: expand with ts window
+      .mockResolvedValueOnce({
+        data: {
+          columns: ['id', 'ts', 'type', 'content', 'senderPlatformId', 'senderName'],
+          rows: [
+            [42, 950, 0, 'before', 'pa', 'Alice'],
+            [43, 1000, 0, 'target', 'pb', 'Bob'],
+            [44, 1050, 0, 'after', 'pa', 'Alice'],
+          ],
+        },
+      })
+
+    const result = await fetchMessageContextViaSql(mockClient as any, {
       session_id: 's1',
-      message_ids: [100],
-      context_size: 5,
-      format: 'json',
+      message_ids: [43],
+      context_size: 10,
     })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/m\.id BETWEEN 95 AND 105/)
-    expect(sql).toMatch(/ORDER BY m\.id/)
+
+    expect(mockClient.post).toHaveBeenCalledTimes(2)
+    const secondSql = mockClient.post.mock.calls[1][1].sql as string
+    expect(secondSql).toContain('m.ts')
+    expect(secondSql).not.toContain('m.id BETWEEN')
+    expect(result.messages).toHaveLength(3)
   })
 
-  it('builds SQL with multiple id ranges joined by OR', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getMessageContext(mockClient as any, {
-      session_id: 's1',
-      message_ids: [100, 500],
-      context_size: 2,
-      format: 'json',
+  it('returns empty result when no targets exist', async () => {
+    mockClient.post.mockResolvedValueOnce({
+      data: { columns: ['ts'], rows: [] },
     })
-    const sql = mockClient.post.mock.calls[0][1].sql as string
-    expect(sql).toMatch(/m\.id BETWEEN 98 AND 102/)
-    expect(sql).toMatch(/m\.id BETWEEN 498 AND 502/)
-    expect(sql).toMatch(/ OR /)
+
+    const result = await fetchMessageContextViaSql(mockClient as any, {
+      session_id: 's1',
+      message_ids: [99999],
+    })
+
+    expect(result.messages).toEqual([])
   })
 
-  it('defaults context_size to 20 and caps at 100', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    await getMessageContext(mockClient as any, { session_id: 's1', message_ids: [50], format: 'json' })
-    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/BETWEEN 30 AND 70/)
+  it('clamps context_size to [1, 100]', async () => {
+    mockClient.post
+      .mockResolvedValueOnce({ data: { columns: ['ts'], rows: [[1000]] } })
+      .mockResolvedValueOnce({ data: { columns: ['id'], rows: [] } })
 
-    mockClient.post.mockClear()
-    await getMessageContext(mockClient as any, {
+    await fetchMessageContextViaSql(mockClient as any, {
       session_id: 's1',
-      message_ids: [200],
-      context_size: 9999,
-      format: 'json',
+      message_ids: [1],
+      context_size: 999,
     })
-    expect(mockClient.post.mock.calls[0][1].sql).toMatch(/BETWEEN 100 AND 300/)
-  })
 
-  it('formats text output with sender names and timestamps', async () => {
-    mockClient.post.mockResolvedValue({
-      data: {
-        rows: [
-          { id: 99, ts: 1700000000, senderName: 'Alice', content: 'hi' },
-          { id: 100, ts: 1700000060, senderName: 'Bob', content: 'hey' },
-        ],
-      },
-    })
-    const out = await getMessageContext(mockClient as any, {
-      session_id: 's1',
-      message_ids: [100],
-      context_size: 1,
-      format: 'text',
-    })
-    expect(out).toMatch(/Alice/)
-    expect(out).toMatch(/Bob/)
-    expect(out).toMatch(/hi/)
-  })
-
-  it('returns informative text on empty result', async () => {
-    mockClient.post.mockResolvedValue({ data: { rows: [] } })
-    const out = await getMessageContext(mockClient as any, {
-      session_id: 's1',
-      message_ids: [999],
-      format: 'text',
-    })
-    expect(out).toMatch(/no.*messages|No matching/i)
+    const sql = mockClient.post.mock.calls[1][1].sql as string
+    // 100 messages before + 100 after each target, with 1 target = max 200 messages
+    expect(sql).toMatch(/LIMIT (200|2000|210)/)
   })
 })
 

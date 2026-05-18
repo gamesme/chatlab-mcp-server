@@ -93,67 +93,75 @@ function missingTableHint(sql: string, err: Error): string | null {
   return null
 }
 
-const getMessageContextSchema = z.object({
-  session_id: z.string().describe('Session ID'),
-  message_ids: z.array(z.number().finite()).min(1).describe('Target message IDs (one or many)'),
-  context_size: z.number().finite().optional().describe('Messages before AND after each target (default 20, max 100)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
-})
+export interface FetchMessageContextParams {
+  session_id: string
+  message_ids: number[]
+  context_size?: number
+}
 
-export type GetMessageContextParams = z.infer<typeof getMessageContextSchema>
-
-export async function getMessageContext(
+export async function fetchMessageContextViaSql(
   client: Pick<ChatLabClient, 'post'>,
-  params: GetMessageContextParams
-): Promise<string> {
-  const { session_id, message_ids, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const ctx = params.context_size !== undefined && Number.isFinite(params.context_size)
-    ? Math.min(Math.max(params.context_size, 1), 100)
-    : 20
+  params: FetchMessageContextParams,
+): Promise<MessageFetchResult> {
+  const ctx =
+    params.context_size !== undefined && Number.isFinite(params.context_size)
+      ? Math.min(Math.max(1, Math.floor(params.context_size)), 100)
+      : 20
 
-  const ranges = message_ids.map((id) => `(m.id BETWEEN ${id - ctx} AND ${id + ctx})`).join(' OR ')
+  // Step 1: look up the timestamps of the target messages.
+  // Using ts as the anchor is robust to deleted / non-contiguous message ids.
+  const ids = params.message_ids.map((id) => Math.floor(id)).join(',')
+  const tsRows = await sqlInternal(
+    client,
+    params.session_id,
+    `SELECT ts FROM message WHERE id IN (${ids}) ORDER BY ts`,
+  )
+
+  if (tsRows.length === 0) {
+    return {
+      messages: [],
+      extra: { requestedMessageIds: params.message_ids, contextSize: ctx },
+    }
+  }
+
+  // Step 2: for each target ts, gather the N messages immediately before and after.
+  // Implementation: UNION of LIMIT-aware subqueries. SQLite supports this efficiently.
+  const targetTimestamps = tsRows.map((r: any) => r.ts as number)
+  const subqueries = targetTimestamps.flatMap((targetTs) => [
+    `SELECT id FROM message WHERE ts <= ${targetTs} ORDER BY ts DESC, id DESC LIMIT ${ctx + 1}`,
+    `SELECT id FROM message WHERE ts > ${targetTs} ORDER BY ts ASC, id ASC LIMIT ${ctx}`,
+  ])
 
   const sql = `
-    SELECT m.id, m.ts, m.type, m.content,
-           mem.platform_id AS senderPlatformId,
-           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    SELECT
+      m.id AS id,
+      m.ts AS ts,
+      m.type AS type,
+      m.content AS content,
+      mem.platform_id AS senderPlatformId,
+      COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
     FROM message m
     LEFT JOIN member mem ON m.sender_id = mem.id
-    WHERE ${ranges}
-    ORDER BY m.id
-    LIMIT 2000
+    WHERE m.id IN (${subqueries.map((q) => `(${q})`).join(' UNION ')})
+    ORDER BY m.ts, m.id
+    LIMIT ${ctx * 2 * targetTimestamps.length + 10}
   `.trim()
 
-  const rows = await sqlInternal(client, session_id, sql)
+  const rows = await sqlInternal(client, params.session_id, sql)
 
-  if (rows.length === 0) {
-    return format === 'json'
-      ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2)
-      : 'No matching messages found for the given message IDs.'
+  const messages: RawMessage[] = rows.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName ?? '?',
+    senderPlatformId: r.senderPlatformId ?? '',
+    content: r.content,
+    timestamp: r.ts,
+    type: r.type,
+  }))
+
+  return {
+    messages,
+    extra: { requestedMessageIds: params.message_ids, contextSize: ctx },
   }
-
-  if (format === 'json') {
-    return JSON.stringify({ total: rows.length, returned: rows.length, rawMessages: rows }, null, 2)
-  }
-
-  const lines = rows.map((r) => {
-    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
-      timeZone: timezone,
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-    const content = r.content ?? '[no content]'
-    return `${time} ${r.senderName}: ${content}`
-  })
-
-  const details: Record<string, unknown> = {
-    total: rows.length,
-    returned: rows.length,
-    requestedMessageIds: message_ids,
-    contextSize: ctx,
-    messages: lines,
-  }
-  return formatToolResultAsText(details)
 }
 
 export interface FetchConversationBetweenParams {
@@ -672,19 +680,17 @@ export async function keywordFrequency(params: KeywordFrequencyParams): Promise<
 }
 
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
-  server.tool(
-    'get_message_context',
-    'Get N messages before and after one or more specific message IDs. Use when the user references "what was being said around message X" or wants to see the conversation surrounding a specific message.',
-    getMessageContextSchema.shape,
-    async (args) => {
-      try {
-        const text = await getMessageContext(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
+  registerMessageTool(server, client, {
+    name: 'get_message_context',
+    description:
+      'Get N messages before and after one or more specific message IDs. Uses time-window expansion (robust to deleted or non-contiguous message IDs). Use when the user references "what was being said around message X".',
+    schema: {
+      session_id: z.string().describe('Session ID'),
+      message_ids: z.array(z.number().finite()).min(1).describe('Target message IDs (one or many)'),
+      context_size: z.number().finite().optional().describe('Messages before AND after each target (default 20, max 100)'),
+    } as const,
+    fetch: (args) => fetchMessageContextViaSql(client, args),
+  })
 
   registerMessageTool(server, client, {
     name: 'get_conversation_between',
