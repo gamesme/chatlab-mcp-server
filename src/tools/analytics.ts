@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { ChatLabClient } from '../client.js'
 import { toolError, sqlInternal } from './utils.js'
 import { formatToolResultAsText } from '../format.js'
+import type { RawMessage } from '../format.js'
+import type { MessageFetchResult } from './message-tool.js'
+import { registerMessageTool } from './message-tool.js'
 
 /**
  * Build SQL fragment for optional ts range filter.
@@ -67,6 +70,14 @@ export function sqlEscape(value: string): string {
 }
 
 /**
+ * Escape a keyword for FTS5 MATCH expression.
+ * Wraps in double quotes; embedded double quotes are doubled.
+ */
+function ftsEscape(keyword: string): string {
+  return `"${keyword.replace(/"/g, '""')}"`
+}
+
+/**
  * If the error indicates a missing table (older schema lacking
  * chat_session / message_fts / etc.), return a friendly hint string.
  * Otherwise return null so the caller can rethrow.
@@ -82,132 +93,225 @@ function missingTableHint(sql: string, err: Error): string | null {
   return null
 }
 
-const getMessageContextSchema = z.object({
-  session_id: z.string().describe('Session ID'),
-  message_ids: z.array(z.number().finite()).min(1).describe('Target message IDs (one or many)'),
-  context_size: z.number().finite().optional().describe('Messages before AND after each target (default 20, max 100)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
-})
-
-export type GetMessageContextParams = z.infer<typeof getMessageContextSchema>
-
-export async function getMessageContext(
-  client: Pick<ChatLabClient, 'post'>,
-  params: GetMessageContextParams
-): Promise<string> {
-  const { session_id, message_ids, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const ctx = params.context_size !== undefined && Number.isFinite(params.context_size)
-    ? Math.min(Math.max(params.context_size, 1), 100)
-    : 20
-
-  const ranges = message_ids.map((id) => `(m.id BETWEEN ${id - ctx} AND ${id + ctx})`).join(' OR ')
-
-  const sql = `
-    SELECT m.id, m.ts, m.type, m.content,
-           mem.platform_id AS senderPlatformId,
-           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
-    FROM message m
-    LEFT JOIN member mem ON m.sender_id = mem.id
-    WHERE ${ranges}
-    ORDER BY m.id
-    LIMIT 2000
-  `.trim()
-
-  const rows = await sqlInternal(client, session_id, sql)
-
-  if (rows.length === 0) {
-    return format === 'json'
-      ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2)
-      : 'No matching messages found for the given message IDs.'
-  }
-
-  if (format === 'json') {
-    return JSON.stringify({ total: rows.length, returned: rows.length, rawMessages: rows }, null, 2)
-  }
-
-  const lines = rows.map((r) => {
-    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
-      timeZone: timezone,
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-    const content = r.content ?? '[no content]'
-    return `${time} ${r.senderName}: ${content}`
-  })
-
-  const details: Record<string, unknown> = {
-    total: rows.length,
-    returned: rows.length,
-    requestedMessageIds: message_ids,
-    contextSize: ctx,
-    messages: lines,
-  }
-  return formatToolResultAsText(details)
+export interface FetchMessageContextParams {
+  session_id: string
+  message_ids: number[]
+  context_size?: number
 }
 
-const getConversationBetweenSchema = z.object({
-  session_id: z.string().describe('Session ID'),
-  member_id_1: z.number().finite().describe('First member numeric ID (from get_members)'),
-  member_id_2: z.number().finite().describe('Second member numeric ID (from get_members)'),
-  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
-  limit: z.number().finite().optional().describe('Max messages (default 100, max 1000)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
-})
-
-export type GetConversationBetweenParams = z.infer<typeof getConversationBetweenSchema>
-
-export async function getConversationBetween(
+export async function fetchMessageContextViaSql(
   client: Pick<ChatLabClient, 'post'>,
-  params: GetConversationBetweenParams
-): Promise<string> {
-  const {
-    session_id, member_id_1, member_id_2,
-    start_time, end_time, format = 'text', timezone = 'Asia/Shanghai',
-  } = params
-  const limit = params.limit !== undefined && Number.isFinite(params.limit)
-    ? Math.min(Math.max(params.limit, 1), 1000)
-    : 100
+  params: FetchMessageContextParams,
+): Promise<MessageFetchResult> {
+  const ctx =
+    params.context_size !== undefined && Number.isFinite(params.context_size)
+      ? Math.min(Math.max(1, Math.floor(params.context_size)), 100)
+      : 20
+
+  // Step 1: look up the timestamps of the target messages.
+  // Using ts as the anchor is robust to deleted / non-contiguous message ids.
+  const ids = params.message_ids.map((id) => Math.floor(id)).join(',')
+  const tsRows = await sqlInternal(
+    client,
+    params.session_id,
+    `SELECT ts FROM message WHERE id IN (${ids}) ORDER BY ts`,
+  )
+
+  if (tsRows.length === 0) {
+    return {
+      messages: [],
+      extra: { requestedMessageIds: params.message_ids, contextSize: ctx },
+    }
+  }
+
+  // Step 2: for each target ts, gather the N messages immediately before and after.
+  // Implementation: UNION of LIMIT-aware subqueries. SQLite supports this efficiently.
+  const targetTimestamps = tsRows.map((r: any) => r.ts as number)
+  const subqueries = targetTimestamps.flatMap((targetTs) => [
+    `SELECT id FROM message WHERE ts <= ${targetTs} ORDER BY ts DESC, id DESC LIMIT ${ctx + 1}`,
+    `SELECT id FROM message WHERE ts > ${targetTs} ORDER BY ts ASC, id ASC LIMIT ${ctx}`,
+  ])
 
   const sql = `
-    SELECT m.id, m.ts, m.type, m.content,
-           mem.platform_id AS senderPlatformId,
-           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    SELECT
+      m.id AS id,
+      m.ts AS ts,
+      m.type AS type,
+      m.content AS content,
+      mem.platform_id AS senderPlatformId,
+      COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    FROM message m
+    LEFT JOIN member mem ON m.sender_id = mem.id
+    WHERE m.id IN (${subqueries.map((q) => `(${q})`).join(' UNION ')})
+    ORDER BY m.ts, m.id
+    LIMIT ${ctx * 2 * targetTimestamps.length + 10}
+  `.trim()
+
+  const rows = await sqlInternal(client, params.session_id, sql)
+
+  const messages: RawMessage[] = rows.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName ?? '?',
+    senderPlatformId: r.senderPlatformId ?? '',
+    content: r.content,
+    timestamp: r.ts,
+    type: r.type,
+  }))
+
+  return {
+    messages,
+    extra: { requestedMessageIds: params.message_ids, contextSize: ctx },
+  }
+}
+
+export interface FetchConversationBetweenParams {
+  session_id: string
+  member_id_1: number
+  member_id_2: number
+  start_time?: number
+  end_time?: number
+  limit?: number
+}
+
+export async function fetchConversationBetweenViaSql(
+  client: Pick<ChatLabClient, 'post'>,
+  params: FetchConversationBetweenParams,
+): Promise<MessageFetchResult> {
+  const limit =
+    params.limit !== undefined && Number.isFinite(params.limit)
+      ? Math.min(Math.max(1, Math.floor(params.limit)), 1000)
+      : 100
+
+  const sql = `
+    SELECT
+      m.id AS id,
+      m.ts AS ts,
+      m.type AS type,
+      m.content AS content,
+      mem.platform_id AS senderPlatformId,
+      COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
     FROM message m
     JOIN member mem ON m.sender_id = mem.id
-    WHERE m.sender_id IN (${Math.floor(member_id_1)}, ${Math.floor(member_id_2)})
-      ${buildTimeFilter(start_time, end_time, 'm.ts')}
+    WHERE m.sender_id IN (${Math.floor(params.member_id_1)}, ${Math.floor(params.member_id_2)})
+      ${buildTimeFilter(params.start_time, params.end_time, 'm.ts')}
     ORDER BY m.ts, m.id
     LIMIT ${limit}
   `.trim()
 
-  const rows = await sqlInternal(client, session_id, sql)
+  const rows = await sqlInternal(client, params.session_id, sql)
 
-  if (rows.length === 0) {
-    return format === 'json'
-      ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2)
-      : 'No conversation found between these two members in the given range.'
+  const messages: RawMessage[] = rows.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName,
+    senderPlatformId: r.senderPlatformId,
+    content: r.content,
+    timestamp: r.ts,
+    type: r.type,
+  }))
+
+  return {
+    messages,
+    extra: { member_id_1: params.member_id_1, member_id_2: params.member_id_2 },
+  }
+}
+
+export interface FetchDeepSearchParams {
+  session_id: string
+  keywords: string[]
+  sender_id?: number
+  start_time?: number
+  end_time?: number
+  limit?: number
+  context_before?: number
+  context_after?: number
+}
+
+export async function fetchDeepSearchViaSql(
+  client: Pick<ChatLabClient, 'post'>,
+  params: FetchDeepSearchParams,
+): Promise<MessageFetchResult> {
+  const limit =
+    params.limit !== undefined && Number.isFinite(params.limit)
+      ? Math.min(Math.max(1, Math.floor(params.limit)), 1000)
+      : 100
+  const before =
+    params.context_before !== undefined && Number.isFinite(params.context_before)
+      ? Math.min(Math.max(0, Math.floor(params.context_before)), 20)
+      : 2
+  const after =
+    params.context_after !== undefined && Number.isFinite(params.context_after)
+      ? Math.min(Math.max(0, Math.floor(params.context_after)), 20)
+      : 2
+
+  const matchExpr = params.keywords.map(ftsEscape).join(' OR ')
+
+  let senderClause = ''
+  if (params.sender_id !== undefined && Number.isFinite(params.sender_id)) {
+    senderClause = ` AND m.sender_id = ${Math.floor(params.sender_id)}`
   }
 
-  if (format === 'json') {
-    return JSON.stringify({ total: rows.length, returned: rows.length, rawMessages: rows }, null, 2)
+  const hitsSql = `
+    SELECT m.id, m.ts
+    FROM message m
+    JOIN message_fts ON m.id = message_fts.rowid
+    WHERE message_fts MATCH '${sqlEscape(matchExpr)}'
+      ${senderClause}
+      ${buildTimeFilter(params.start_time, params.end_time, 'm.ts')}
+    ORDER BY m.ts, m.id
+    LIMIT ${limit}
+  `.trim()
+
+  let hits: any[]
+  try {
+    hits = await sqlInternal(client, params.session_id, hitsSql)
+  } catch (e) {
+    if (/no such table/i.test((e as Error).message ?? '')) {
+      return {
+        messages: [],
+        extra: {
+          message: 'This feature requires a newer database schema (chat_session / message_fts). Please reimport the session in the latest ChatLab version.',
+        },
+      }
+    }
+    throw e
   }
 
-  const lines = rows.map((r) => {
-    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
-      timeZone: timezone,
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-    return `${time} ${r.senderName}: ${r.content ?? '[no content]'}`
-  })
+  if (hits.length === 0) {
+    return {
+      messages: [],
+      extra: { hits: 0, message: `No matches for keywords: ${params.keywords.join(', ')}` },
+    }
+  }
 
-  return formatToolResultAsText({
-    total: rows.length,
-    returned: rows.length,
-    member_id_1, member_id_2,
-    messages: lines,
-  })
+  const ranges = hits.map((h) => `(m.id BETWEEN ${h.id - before} AND ${h.id + after})`).join(' OR ')
+
+  const contextSql = `
+    SELECT
+      m.id AS id,
+      m.ts AS ts,
+      m.type AS type,
+      m.content AS content,
+      mem.platform_id AS senderPlatformId,
+      COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
+    FROM message m
+    LEFT JOIN member mem ON m.sender_id = mem.id
+    WHERE ${ranges}
+    ORDER BY m.id
+    LIMIT 5000
+  `.trim()
+
+  const rows = await sqlInternal(client, params.session_id, contextSql)
+
+  const messages: RawMessage[] = rows.map((r: any) => ({
+    id: r.id,
+    senderName: r.senderName ?? '?',
+    senderPlatformId: r.senderPlatformId ?? '',
+    content: r.content,
+    timestamp: r.ts,
+    type: r.type,
+  }))
+
+  return { messages, extra: { hits: hits.length } }
 }
 
 const getSessionSummariesSchema = z.object({
@@ -295,115 +399,6 @@ export async function getSessionSummaries(
     returned: sessions.length,
     summaries: lines,
   })
-}
-
-const deepSearchSchema = z.object({
-  session_id: z.string().describe('Session ID'),
-  keywords: z.array(z.string()).min(1).describe('Keywords to search (FTS5 MATCH, joined by OR)'),
-  sender_id: z.number().finite().optional().describe('Restrict to a specific sender (numeric member.id)'),
-  start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
-  end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
-  limit: z.number().finite().optional().describe('Max hits before context expansion (default 100, max 1000)'),
-  context_before: z.number().finite().optional().describe('Context messages before each hit (default 2, max 20)'),
-  context_after: z.number().finite().optional().describe('Context messages after each hit (default 2, max 20)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-  timezone: z.string().optional().describe('Timezone for time display (default Asia/Shanghai)'),
-})
-
-export type DeepSearchParams = z.infer<typeof deepSearchSchema>
-
-function ftsEscape(keyword: string): string {
-  // FTS5 quoted phrases — embedded double quotes are doubled.
-  return `"${keyword.replace(/"/g, '""')}"`
-}
-
-export async function deepSearchMessages(
-  client: Pick<ChatLabClient, 'post'>,
-  params: DeepSearchParams
-): Promise<string> {
-  const { session_id, keywords, sender_id, start_time, end_time, format = 'text', timezone = 'Asia/Shanghai' } = params
-  const limit = params.limit !== undefined && Number.isFinite(params.limit)
-    ? Math.min(Math.max(params.limit, 1), 1000)
-    : 100
-  const before = params.context_before !== undefined && Number.isFinite(params.context_before)
-    ? Math.min(Math.max(params.context_before, 0), 20)
-    : 2
-  const after = params.context_after !== undefined && Number.isFinite(params.context_after)
-    ? Math.min(Math.max(params.context_after, 0), 20)
-    : 2
-
-  const matchExpr = keywords.map(ftsEscape).join(' OR ')
-
-  let senderClause = ''
-  if (sender_id !== undefined && Number.isFinite(sender_id)) {
-    senderClause = ` AND m.sender_id = ${Math.floor(sender_id)}`
-  }
-
-  const hitsSql = `
-    SELECT m.id, m.ts
-    FROM message m
-    JOIN message_fts ON m.id = message_fts.rowid
-    WHERE message_fts MATCH '${sqlEscape(matchExpr)}'
-      ${senderClause}
-      ${buildTimeFilter(start_time, end_time, 'm.ts')}
-    ORDER BY m.ts, m.id
-    LIMIT ${limit}
-  `.trim()
-
-  let hits: any[]
-  try {
-    hits = await sqlInternal(client, session_id, hitsSql)
-  } catch (e) {
-    const hint = missingTableHint(hitsSql, e as Error)
-    if (hint) return format === 'json' ? JSON.stringify({ message: hint }, null, 2) : hint
-    throw e
-  }
-
-  if (hits.length === 0) {
-    const msg = `No matches for keywords: ${keywords.join(', ')}`
-    return format === 'json' ? JSON.stringify({ total: 0, returned: 0, rawMessages: [] }, null, 2) : msg
-  }
-
-  const ranges = hits
-    .map((h) => `(m.id BETWEEN ${h.id - before} AND ${h.id + after})`)
-    .join(' OR ')
-
-  const contextSql = `
-    SELECT m.id, m.ts, m.type, m.content,
-           mem.platform_id AS senderPlatformId,
-           COALESCE(mem.group_nickname, mem.account_name, mem.platform_id) AS senderName
-    FROM message m
-    LEFT JOIN member mem ON m.sender_id = mem.id
-    WHERE ${ranges}
-    ORDER BY m.id
-    LIMIT 5000
-  `.trim()
-
-  const expanded = await sqlInternal(client, session_id, contextSql)
-
-  return formatRowsAsConversation(expanded, format, timezone, {
-    hits: hits.length,
-    total: expanded.length,
-  })
-}
-
-function formatRowsAsConversation(
-  rows: any[],
-  format: 'json' | 'text',
-  timezone: string,
-  extra: Record<string, unknown>
-): string {
-  if (format === 'json') {
-    return JSON.stringify({ ...extra, returned: rows.length, rawMessages: rows }, null, 2)
-  }
-  const lines = rows.map((r) => {
-    const time = new Date(r.ts * 1000).toLocaleString('zh-CN', {
-      timeZone: timezone,
-      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-    })
-    return `${time} ${r.senderName ?? '?'}: ${r.content ?? '[no content]'}`
-  })
-  return formatToolResultAsText({ ...extra, returned: rows.length, messages: lines })
 }
 
 const WEEKDAY_NAMES_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -646,72 +641,33 @@ export async function getResponseTimeAnalysis(
   return formatToolResultAsText({ topN, returned: rows.length, pairs: lines })
 }
 
-const keywordFrequencySchema = z.object({
-  session_id: z.string().describe('Session ID (unused; tool returns info only)'),
-  format: z.enum(['json', 'text']).optional().describe('Output format: text (default) or json'),
-})
-
-export type KeywordFrequencyParams = z.infer<typeof keywordFrequencySchema>
-
-const KEYWORD_FREQUENCY_MESSAGE = `keyword_frequency is not implemented in chatlab-mcp-server.
-
-This feature requires CJK word segmentation (jieba / kuromoji), which the MCP
-server does not bundle to keep the package lightweight.
-
-Alternatives:
-1. Run keyword_frequency in the ChatLab desktop app (Insights > Word Cloud).
-2. Use execute_sql with LIKE patterns for known phrases:
-     SELECT content, COUNT(*) AS c FROM message
-     WHERE content LIKE '%<phrase>%'
-     GROUP BY content ORDER BY c DESC LIMIT 20
-3. Use get_messages with a keyword filter and count occurrences in your reply.`
-
-const KEYWORD_FREQUENCY_ALTERNATIVES = [
-  "Run keyword_frequency in the ChatLab desktop app (Insights > Word Cloud).",
-  "Use execute_sql with LIKE patterns to count occurrences of known phrases.",
-  "Use get_messages with a keyword filter and count in the LLM response.",
-]
-
-export async function keywordFrequency(params: KeywordFrequencyParams): Promise<string> {
-  void params.session_id
-  if (params.format === 'json') {
-    return JSON.stringify(
-      { message: KEYWORD_FREQUENCY_MESSAGE, available_alternatives: KEYWORD_FREQUENCY_ALTERNATIVES },
-      null,
-      2
-    )
-  }
-  return KEYWORD_FREQUENCY_MESSAGE
-}
-
 export function registerAnalyticsTools(server: McpServer, client: ChatLabClient): void {
-  server.tool(
-    'get_message_context',
-    'Get N messages before and after one or more specific message IDs. Use when the user references "what was being said around message X" or wants to see the conversation surrounding a specific message.',
-    getMessageContextSchema.shape,
-    async (args) => {
-      try {
-        const text = await getMessageContext(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
+  registerMessageTool(server, client, {
+    name: 'get_message_context',
+    description:
+      'Get N messages before and after one or more specific message IDs. Uses time-window expansion (robust to deleted or non-contiguous message IDs). Use when the user references "what was being said around message X".',
+    schema: {
+      session_id: z.string().describe('Session ID'),
+      message_ids: z.array(z.number().finite()).min(1).describe('Target message IDs (one or many)'),
+      context_size: z.number().finite().optional().describe('Messages before AND after each target (default 20, max 100)'),
+    } as const,
+    fetch: (args) => fetchMessageContextViaSql(client, args),
+  })
 
-  server.tool(
-    'get_conversation_between',
-    'Get messages between two specific members (interleaved by time). Use when the user asks "what did A and B talk about". Members must be referenced by their numeric DB id; call get_members first to look them up.',
-    getConversationBetweenSchema.shape,
-    async (args) => {
-      try {
-        const text = await getConversationBetween(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
+  registerMessageTool(server, client, {
+    name: 'get_conversation_between',
+    description:
+      'Get messages between two specific members (interleaved by time). Use when the user asks "what did A and B talk about". Members must be referenced by their numeric DB id (from get_members).',
+    schema: {
+      session_id: z.string().describe('Session ID'),
+      member_id_1: z.number().finite().describe('First member numeric ID (from get_members)'),
+      member_id_2: z.number().finite().describe('Second member numeric ID (from get_members)'),
+      start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+      end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
+      limit: z.number().finite().optional().describe('Max messages (default 100, max 1000)'),
+    } as const,
+    fetch: (args) => fetchConversationBetweenViaSql(client, args),
+  })
 
   server.tool(
     'get_session_summaries',
@@ -727,19 +683,22 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     }
   )
 
-  server.tool(
-    'deep_search_messages',
-    'Full-text search messages via FTS5, then expand each hit with surrounding context messages. Use for "did anyone mention X" style queries where conversation context matters.',
-    deepSearchSchema.shape,
-    async (args) => {
-      try {
-        const text = await deepSearchMessages(client, args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
+  registerMessageTool(server, client, {
+    name: 'deep_search_messages',
+    description:
+      'Full-text search messages via FTS5, then expand each hit with surrounding context messages. Use for "did anyone mention X" style queries where conversation context matters.',
+    schema: {
+      session_id: z.string().describe('Session ID'),
+      keywords: z.array(z.string()).min(1).describe('Keywords to search (FTS5 MATCH, joined by OR)'),
+      sender_id: z.number().finite().optional().describe('Restrict to a specific sender (numeric member.id)'),
+      start_time: z.number().finite().optional().describe('Start time (Unix seconds)'),
+      end_time: z.number().finite().optional().describe('End time (Unix seconds)'),
+      limit: z.number().finite().optional().describe('Max hits before context expansion (default 100, max 1000)'),
+      context_before: z.number().finite().optional().describe('Context messages before each hit (default 2, max 20)'),
+      context_after: z.number().finite().optional().describe('Context messages after each hit (default 2, max 20)'),
+    } as const,
+    fetch: (args) => fetchDeepSearchViaSql(client, args),
+  })
 
   server.tool(
     'get_time_stats',
@@ -797,17 +756,4 @@ export function registerAnalyticsTools(server: McpServer, client: ChatLabClient)
     }
   )
 
-  server.tool(
-    'keyword_frequency',
-    'Word/keyword frequency analysis. Currently not implemented in the MCP server due to NLP dependency size; returns a stub message with alternative approaches.',
-    keywordFrequencySchema.shape,
-    async (args) => {
-      try {
-        const text = await keywordFrequency(args)
-        return { content: [{ type: 'text' as const, text }] }
-      } catch (e) {
-        return toolError(e, args.session_id)
-      }
-    }
-  )
 }

@@ -4,7 +4,7 @@
 
 MCP server that connects [ChatLab](https://github.com/hellodigua/ChatLab) to AI assistants (Claude Desktop, Cursor, custom agents). Query your local chat history with natural language.
 
-> Tracks ChatLab v0.19.0
+> Tracks ChatLab v0.19.0 — **v0.20** refactored message tools (see [Breaking Changes](#breaking-changes))
 
 ## Requirements
 
@@ -81,17 +81,20 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 
 ## Tools
 
-### Core (6)
+15 tools total (v0.20).
+
+### Core (7)
 | Tool | Description |
 |------|-------------|
 | `list_sessions` | List all imported chat sessions with name, platform, and message count |
 | `get_session` | Get details of a single session by ID |
-| `get_messages` | Retrieve messages with filters: keyword, time range, sender, pagination (max 100/call) |
+| `get_messages` | Retrieve messages with filters: keyword, time range, sender, pagination (default `limit` 100, max 500) |
+| `get_full_conversation` | Full chronological message history for a session |
 | `get_members` | List all members in a session with their platformId and message count |
 | `get_stats_overview` | Statistical overview: message counts, member activity, type distribution, time range |
 | `execute_sql` | Run aggregation queries (COUNT/GROUP BY) against the session database |
 
-### Analytics (v0.19.0+, 9)
+### Analytics (v0.19.0+, 8)
 | Tool | Description |
 |------|-------------|
 | `get_message_context` | N messages before/after one or more target message IDs |
@@ -102,14 +105,41 @@ Restart Claude Desktop after saving. The `chatlab` tools will appear in the tool
 | `get_member_activity` | Top-N members by message count with percentage of total |
 | `get_member_name_history` | Historical account name / nickname entries for a member |
 | `get_response_time_analysis` | Reply intervals between sender pairs (LAG window function) |
-| `keyword_frequency` | Stub — returns guidance (NLP segmentation not bundled in MCP) |
+
+### Shared message-tool params
+
+All message-returning tools (`get_messages`, `get_full_conversation`, `get_message_context`, `get_conversation_between`, `deep_search_messages`) accept:
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `format` | `text` | `text` or `json` |
+| `timezone` | `Asia/Shanghai` | IANA timezone for date display (e.g. `Asia/Shanghai`, `America/New_York`, `UTC`) |
+| `merge_consecutive` | `true` | Merge back-to-back messages from the same sender |
+| `filter_invalid` | `true` | Skip system/empty messages at the SQL layer |
 
 ### Notes
 
-- `get_messages` returns at most 100 messages per call. Use the `page` parameter to paginate. Responses include `has_more` and a `hint` when more results exist.
-- `execute_sql` is for statistical aggregation only. Use `get_messages` or `get_message_context` to read message content.
+- `get_messages` default limit is 100. Use the `page` parameter to paginate. Responses include `has_more` and a `hint` when more results exist.
+- `get_messages` returns `id` and `senderPlatformId` per message so `get_message_context` can be called as a follow-up.
+- `execute_sql` is for statistical aggregation only. Use `get_messages` or `get_message_context` to read message content. Available tables: `message`, `member`, `chat_session`, `message_fts`, `member_name_history`.
 - Analytics tools issue their own SQL through the same `/sql` endpoint (no 200-row LIMIT injection).
 - All avatar/binary fields are stripped from responses to minimize context usage.
+
+## Breaking Changes
+
+### v0.20 (message tools refactor)
+
+- **Removed `get_conversation_text`** — use `get_messages(format='text', limit=…)` instead.
+- **Removed `keyword_frequency`** (was a stub) — use `execute_sql` with `LIKE` patterns or the ChatLab desktop app's Insights > Word Cloud.
+
+### Improvements
+
+- All 5 message-returning tools now support shared params: `format`, `timezone`, `merge_consecutive`, `filter_invalid`. Previously these worked only on `get_messages` and the two conversation tools.
+- `get_messages` default `limit` increased from 20 → 100.
+- `get_messages` now returns `id` and `senderPlatformId` per message so `get_message_context` can be called as a follow-up.
+- `get_messages` with `filter_invalid=true` (default) now filters at the SQL layer, saving bandwidth.
+- `get_message_context` uses time-window expansion (robust to deleted / non-contiguous message IDs).
+- `execute_sql` description now lists all available tables.
 
 ## CLI Options
 
